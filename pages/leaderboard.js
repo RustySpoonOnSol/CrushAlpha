@@ -1,10 +1,9 @@
 // pages/leaderboard.js
-import { useEffect, useRef, useState, useLayoutEffect } from "react";
+import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
-import { supabase } from "../utils/supabaseClient";
 import { useWallet } from "@solana/wallet-adapter-react";
 
-/* ---------- ENV / RPC ---------- */
+/* ---------- ENV / RPC (holders uses Helius when present) ---------- */
 const CRUSH_MINT = (process.env.NEXT_PUBLIC_CRUSH_MINT || "").replace(/:$/, "");
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY;
 const HELIUS_RPC_URL = HELIUS_API_KEY
@@ -26,14 +25,28 @@ const RESERVED_EXACT = ["anonymous","guest","user","null","undefined"];
 /* ---------- SETTINGS ---------- */
 const HIDE_ANON_GUEST_ROWS = true;
 
+/* ---------- Demo leaderboard (alpha: no Supabase) ---------- */
+const DEMO_FLIRTS = [
+  { wallet: "9xp1demo1111111111111111111111111111111", name: "VelvetVibes", xp: 4200, level: 7 },
+  { wallet: "9xp2demo2222222222222222222222222222222", name: "HeartSpark", xp: 3100, level: 6 },
+  { wallet: "9xp3demo3333333333333333333333333333333", name: "StellarCrush", xp: 2600, level: 5 },
+  { wallet: "9xp4demo4444444444444444444444444444444", name: "BlushByte", xp: 2200, level: 5 },
+  { wallet: "9xp5demo5555555555555555555555555555555", name: "MoonTease", xp: 1900, level: 4 },
+];
+
 /* ---------- helpers ---------- */
 function ensureGuestId() {
   if (typeof window === "undefined") return null;
   let id = localStorage.getItem(LS_GUEST_ID_KEY);
   if (!id) {
+    // lightweight random id
     const buf = new Uint8Array(8);
-    crypto.getRandomValues(buf);
-    id = "guest_" + Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
+    (window.crypto || {}).getRandomValues?.(buf);
+    id =
+      "guest_" +
+      Array.from(buf.length ? buf : [Date.now() & 255, (Date.now() >> 8) & 255])
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
     localStorage.setItem(LS_GUEST_ID_KEY, id);
   }
   return id;
@@ -54,8 +67,6 @@ function isInvalidName(v){
   if(!/^[\p{L}\p{N} ._-]+$/u.test(s)) return "Only letters, numbers, space, . _ -";
   return null;
 }
-
-/* Percentile formatter (smart; never 100% for #1) */
 function formatPercentile(rank, total){
   if (!rank || rank < 1) return "1";
   if (rank === 1) return total >= 1000 ? "0.1" : "1";
@@ -64,14 +75,7 @@ function formatPercentile(rank, total){
   if (p < 1) return Math.max(0.1, +p.toFixed(1)).toString();
   return String(Math.max(1, Math.round(p)));
 }
-
-/* Build a safe ILIKE pattern and do case-insensitive EXACT collision check client-side */
-function buildIlikePattern(s){
-  // escape SQL wildcards so we don't accidentally broaden the match
-  const escaped = s.replace(/[%_]/g, "\\$&");
-  return `%${escaped}%`;
-}
-function canon(s){ return (s||"").trim().toLowerCase(); }
+const canon = (s) => (s || "").trim().toLowerCase();
 
 /* ========================================================= */
 export default function LeaderboardPage(){
@@ -135,129 +139,97 @@ export default function LeaderboardPage(){
     finally{ setHoldersLoading(false); }
   }
 
-  /* ---------- Flirts (XP leaderboard) ---------- */
+  /* ---------- Flirts (XP leaderboard — alpha local/demo) ---------- */
   const [flirts,setFlirts] = useState([]);
   const [allFlirts,setAllFlirts] = useState([]);
   const [flirtsLoading,setFlirtsLoading] = useState(true);
   const prevRanks = useRef(new Map());
   const prevXp = useRef(new Map());
-  const mergingRef = useRef(false);
-
   const [shine,setShine] = useState(()=>new Set());
 
-  async function attemptMergeIdentity(list){
-    if(mergingRef.current) return;
-    if(!myWallet || !guestId) return;
-
-    const guestRow = list.find(r => r.wallet === guestId);
-    if(!guestRow) return;
-
-    const walletRow = list.find(r => r.wallet === myWallet);
-    mergingRef.current = true;
-    try{
-      const newXp = (walletRow?.xp || 0) + (guestRow.xp || 0);
-      const newLevel = Math.max(walletRow?.level || 0, guestRow.level || 0);
-      const newName =
-        (storedDisplayName?.trim()) ||
-        (walletRow?.name?.trim()) ||
-        (guestRow?.name?.trim()) ||
-        null;
-
-      await supabase
-        .from("leaderboard")
-        .upsert({ wallet: myWallet, name: newName, xp: newXp, level: newLevel }, { onConflict: "wallet" });
-
-      await supabase.from("leaderboard").delete().eq("wallet", guestId);
-      try { localStorage.setItem(LS_MERGED_KEY,"1"); } catch {}
-    }catch(e){ console.error("merge identity failed:", e); }
-    finally{ mergingRef.current = false; }
-  }
+  // Build local/demo list, include "me" if present
+  const buildLocalFlirts = useMemo(() => {
+    return (meName, meId) => {
+      const base = [...DEMO_FLIRTS];
+      // Ensure no collision with demo wallets
+      const meWallet = meId || "guest_demo_me";
+      const meRow = {
+        wallet: meWallet,
+        name: meName || null,
+        xp: 1200,
+        level: 3,
+      };
+      // If me already exists in base (unlikely), replace; else add
+      const idx = base.findIndex(r => r.wallet === meWallet);
+      if (idx >= 0) base[idx] = meRow; else base.push(meRow);
+      // Sort by XP desc and rank
+      const ranked = base
+        .map(r => ({...r}))
+        .sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0))
+        .map((r,i)=> ({...r, _rank: i+1, _delta: 0}));
+      return ranked;
+    };
+  }, []);
 
   function combineSelfRowsStrict(rows){
-    const ids = [myWallet, guestId].filter(Boolean);
-    if(ids.length === 0) return rows.slice();
-
-    const mergedFlag = (typeof window!=="undefined") ? localStorage.getItem(LS_MERGED_KEY)==="1" : false;
-    const baseRows = (mergedFlag && myWallet)
-      ? rows.filter(r => r.wallet !== guestId)
-      : rows.slice();
-
-    const mine = baseRows.filter(r => ids.includes(r.wallet));
-    if(mine.length === 0) return baseRows;
-    if(mine.length === 1 && myWallet && mine[0].wallet === myWallet) return baseRows;
-
-    const base = mine.find(r => r.wallet === myWallet) || mine[0];
-    const combinedXp = mine.reduce((s,r)=>s + (Number(r.xp)||0), 0);
-    const combinedLevel = mine.reduce((m,r)=>Math.max(m, Number(r.level)||0), 0);
-    const combinedName =
-      (storedDisplayName || "").trim() ||
-      mine.find(r=> (r.name||"").trim())?.name ||
-      base.name || null;
-
-    const merged = {
-      ...base,
-      wallet: myWallet || base.wallet,
-      xp: combinedXp,
-      level: combinedLevel,
-      name: combinedName || base.name
-    };
-
-    const others = baseRows.filter(r => !ids.includes(r.wallet));
-    return [...others, merged].sort((a,b)=>(Number(b.xp)||0)-(Number(a.xp)||0));
+    // In alpha/local mode, this mainly keeps user row consistent if we ever introduce a guest+wallet combo.
+    return rows.slice().sort((a,b)=>(Number(b.xp)||0)-(Number(a.xp)||0));
   }
 
   async function fetchTopFlirts(){
-    const {data,error}=await supabase
-      .from("leaderboard").select("*").order("xp",{ascending:false});
-    if(error){ console.error(error); setFlirts([]); setAllFlirts([]); setFlirtsLoading(false); return; }
+    try{
+      setFlirtsLoading(true);
+      const meName = storedDisplayName;
+      const meId = myWallet || guestId || "guest_demo_me";
+      // Build local demo list
+      let normalized = buildLocalFlirts(meName, meId);
 
-    let raw = (data||[]).map(r => ({...r}));
-    try { await attemptMergeIdentity(raw); } catch {}
+      // Update stored display name into my row
+      if (meName) {
+        normalized = normalized.map(r => (r.wallet === meId ? { ...r, name: meName } : r));
+      }
 
-    if (storedDisplayName) {
-      raw = raw.map(r =>
-        (r.wallet === myWallet || r.wallet === guestId)
-          ? { ...r, name: storedDisplayName }
-          : r
-      );
-    }
+      // Optionally hide anonymous "guest_" rows (except mine)
+      if (HIDE_ANON_GUEST_ROWS) {
+        normalized = normalized.filter(r => {
+          const isMyGuest = guestId && r.wallet === guestId;
+          if (isMyGuest) return true;
+          const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
+          const nm = (r.name || "").trim().toLowerCase();
+          const isAnon = !nm || nm === "anonymous";
+          return !(isGuest && isAnon);
+        });
+      }
 
-    let normalized = combineSelfRowsStrict(raw);
-
-    if (HIDE_ANON_GUEST_ROWS) {
-      normalized = normalized.filter(r => {
-        const isMyGuest = guestId && r.wallet === guestId;
-        if (isMyGuest) return true;
-        const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
-        const nm = (r.name || "").trim().toLowerCase();
-        const isAnon = !nm || nm === "anonymous";
-        return !(isGuest && isAnon);
-      });
-    }
-
-    const ranked = normalized
-      .map((row, idx) => {
+      // Rank & delta
+      const ranked = combineSelfRowsStrict(normalized).map((row, idx) => {
         const prevIdx = prevRanks.current.get(row.wallet);
         const delta = typeof prevIdx === "number" ? prevIdx - idx : 0;
         return { ...row, _rank: idx + 1, _delta: delta };
       });
 
-    ranked.forEach(r=>{
-      const prev = prevXp.current.get(r.wallet) || 0;
-      if(r.xp > prev){
-        setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
-        setTimeout(()=>setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
-      }
-    });
-    prevXp.current = new Map(ranked.map(r=>[r.wallet, r.xp||0]));
+      // Shine for XP increases (we'll simulate a small tick later)
+      ranked.forEach(r=>{
+        const prev = prevXp.current.get(r.wallet) || 0;
+        if(r.xp > prev){
+          setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
+          setTimeout(()=>setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
+        }
+      });
+      prevXp.current = new Map(ranked.map(r=>[r.wallet, r.xp||0]));
 
-    prevRanks.current = new Map(ranked.map((r,i)=>[r.wallet,i]));
-    setAllFlirts(ranked);
-    setFlirts(ranked.slice(0,25));
-    setFlirtsLoading(false);
+      prevRanks.current = new Map(ranked.map((r,i)=>[r.wallet,i]));
+      setAllFlirts(ranked);
+      setFlirts(ranked.slice(0,25));
+    }catch(e){
+      console.error(e);
+      setFlirts([]); setAllFlirts([]);
+    }finally{
+      setFlirtsLoading(false);
+    }
   }
 
-  /* ---------- Username (availability + save) ---------- */
+  /* ---------- Username (availability + save) [local only in alpha] ---------- */
   const [nameDraft,setNameDraft] = useState("");
   const [nameSaving,setNameSaving] = useState(false);
   const [nameMsg,setNameMsg] = useState("");
@@ -285,7 +257,7 @@ export default function LeaderboardPage(){
     setInitialName(initial);
     setNameMsg(""); setAvailState("idle");
     seededNameRef.current = true;
-  },[myIdentifier,storedDisplayName,allFlirts]); 
+  },[myIdentifier,storedDisplayName,allFlirts]);
 
   useLayoutEffect(()=>{
     if(!isEditingRef.current) return;
@@ -322,22 +294,12 @@ export default function LeaderboardPage(){
       if(!cleaned || cleaned===initialName){ setAvailState("idle"); return; }
       try{
         setAvailState("checking");
-
-        // NEW: case-insensitive EXACT check
-        const pattern = buildIlikePattern(cleaned);
-        const { data, error } = await supabase
-          .from("leaderboard")
-          .select("wallet,name")
-          .ilike("name", pattern)
-          .limit(50);
-        if(id !== availReqIdRef.current) return;
-        if(error) throw error;
-
+        // Local “availability”: exact, case-insensitive against current board
         const target = canon(cleaned);
-        const takenByOther = (data||[]).some(r =>
-          r.wallet !== myIdentifier && canon(r.name) === target
+        const takenByOther = (allFlirts || []).some(
+          (r) => r.wallet !== myIdentifier && canon(r.name) === target
         );
-
+        if (availReqIdRef.current !== id) return;
         setAvailState(takenByOther ? "taken" : "available");
       }catch(e){
         if(id===availReqIdRef.current){
@@ -348,9 +310,9 @@ export default function LeaderboardPage(){
     },350);
 
     return ()=>clearTimeout(t);
-  },[nameDraft,myIdentifier,initialName]);
+  },[nameDraft,myIdentifier,initialName,allFlirts]);
 
-  async function saveName(){
+  function saveName(){
     if(!myIdentifier){ setNameMsg("Connect a wallet or open chat first."); return; }
     const cleaned = cleanName(nameDraft);
     const msg = isInvalidName(cleaned);
@@ -359,37 +321,35 @@ export default function LeaderboardPage(){
 
     setNameSaving(true); setNameMsg("");
     try{
-      // NEW: case-insensitive EXACT duplication guard
-      const pattern = buildIlikePattern(cleaned);
-      const { data: dup, error: dupErr } = await supabase
-        .from("leaderboard")
-        .select("wallet,name")
-        .ilike("name", pattern)
-        .limit(50);
-      if(dupErr) throw dupErr;
-
+      // Local duplication guard
       const target = canon(cleaned);
-      const takenByOther = (dup||[]).some(r =>
-        r.wallet !== myIdentifier && canon(r.name) === target
+      const takenByOther = (allFlirts || []).some(
+        (r) => r.wallet !== myIdentifier && canon(r.name) === target
       );
-      if(takenByOther){
+      if (takenByOther) {
         setAvailState("taken");
         setNameMsg("Name is already taken.");
         setNameSaving(false);
         return;
       }
 
+      // Save locally and update board
       localStorage.setItem(LS_DISPLAY_NAME_KEY, cleaned);
       setStoredDisplayName(cleaned);
 
-      await supabase.from("leaderboard")
-        .upsert({ wallet: myIdentifier, name: cleaned }, { onConflict: "wallet" });
+      setAllFlirts(list => {
+        const mapped = list.map(r => r.wallet === myIdentifier ? { ...r, name: cleaned } : r);
+        return mapped;
+      });
+      setFlirts(list => {
+        const mapped = list.map(r => r.wallet === myIdentifier ? { ...r, name: cleaned } : r);
+        return mapped;
+      });
 
       setAvailState("available");
       setInitialName(cleaned);
       setNameMsg("Saved ✓");
       addToast("Saved ✓");
-      fetchTopFlirts();
     }catch(e){
       console.error(e);
       setAvailState("error");
@@ -403,14 +363,24 @@ export default function LeaderboardPage(){
   useEffect(()=>{
     fetchTopHolders(); fetchTopFlirts();
 
-    const ch=supabase
-      .channel("leaderboard-changes")
-      .on("postgres_changes",{event:"*",schema:"public",table:"leaderboard"},fetchTopFlirts)
-      .subscribe();
-
+    // Simple periodic refresh (local demo + holders polling)
     let t1,t2;
     const start=()=>{
-      t1=setInterval(fetchTopFlirts, 5000);
+      t1=setInterval(()=>{
+        // tiny random tick to demo shine effect on one random row
+        setAllFlirts(cur=>{
+          if(!cur || !cur.length) return cur;
+          const idx = Math.floor(Math.random()*Math.min(cur.length,5));
+          const bumped = cur.map((r,i)=> i===idx ? { ...r, xp: (r.xp||0) + Math.floor(Math.random()*6) } : r);
+          // re-rank
+          const ranked = bumped.slice().sort((a,b)=>(b.xp||0)-(a.xp||0)).map((r,i)=>({ ...r, _rank:i+1 }));
+          return ranked;
+        });
+        setFlirts(cur=>{
+          // keep first 25 in sync with allFlirts
+          return (prev => prev.slice(0,25))(allFlirts);
+        });
+      }, 5000);
       t2=setInterval(fetchTopHolders,60_000);
     };
     const stop=()=>{ clearInterval(t1); clearInterval(t2); };
@@ -418,7 +388,8 @@ export default function LeaderboardPage(){
     onVis();
     document.addEventListener("visibilitychange", onVis);
 
-    return ()=>{ supabase.removeChannel(ch); stop(); document.removeEventListener("visibilitychange", onVis); };
+    return ()=>{ stop(); document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[guestId,myWallet,storedDisplayName]);
 
   /* ---------- Toasts ---------- */
@@ -565,7 +536,7 @@ export default function LeaderboardPage(){
               {holdersLoading ? (
                 <SkeletonRows cols={[10,0,32]} rows={6}/>
               ) : holders.length===0 ? (
-                <EmptyRow text={(!CRUSH_MINT||!HELIUS_API_KEY)?"Add NEXT_PUBLIC_CRUSH_MINT + NEXT_PUBLIC_HELIUS_KEY to .env.local":"No data yet"}/>
+                <EmptyRow text={(!CRUSH_MINT||!HELIUS_API_KEY)?"Add NEXT_PUBLIC_CRUSH_MINT + NEXT_PUBLIC_HELIUS_KEY to env":"No data yet"}/>
               ) : holders.map(h=>{
                 const me=myWallet && h.wallet===myWallet;
                 return (
@@ -589,7 +560,7 @@ export default function LeaderboardPage(){
         <section className="lb-section">
           <h2>Top Flirts</h2>
 
-          {/* New combined UI */}
+          {/* Name + Share */}
           <NameEditor />
 
           <div className="lb-card">
