@@ -1,0 +1,843 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ----- BACKGROUND (Flirty Upgraded) ----- */
+body {
+  @apply bg-cover bg-center min-h-screen text-white;
+  /* Upgraded flirty seductive galaxy gradient */
+  background: linear-gradient(
+    120deg,
+    #ffd1ec 0%,
+    #ffb6d5 25%,
+    #e098f8 48%,
+    #a6a1ff 75%,
+    #b5fffc 100%
+  );
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow-x: hidden;
+  transition: background 1s;
+}
+
+/* --- Seductive Star Sparkle Layer --- */
+.sparkle::after {
+  content: '✨';
+  position: absolute;
+  animation: sparkleAnim 1.8s infinite ease-in-out;
+  font-size: 1.2rem;
+}
+@keyframes sparkleAnim {
+  0% { opacity: 0; transform: translateY(0) scale(1);}
+  50% { opacity: 1; transform: translateY(-10px) scale(1.2);}
+  100% { opacity: 0; transform: translateY(0) scale(1);}
+}
+@keyframes floatSparkles {
+  0% { transform: translateY(0); opacity: 0.5; }
+  50% { transform: translateY(-20px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 0.5; }
+}
+.sparkle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 6px white;
+  animation: floatSparkles 3s infinite ease-in-out;
+}
+@keyframes shootingStar {
+  0% { transform: translate(0, 0) rotate(45deg); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translate(300px, 300px) rotate(45deg); opacity: 0; }
+}
+.shooting-star {
+  position: absolute;
+  width: 2px;
+  height: 80px;
+  background: linear-gradient(45deg, white, transparent);
+  animation: shootingStar 5s linear infinite;
+  opacity: 0;
+}
+
+/* ------ TITLE (Bounce & Glow, RANDOM) ------ */
+.title-glow {
+  font-size: 3rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 10px #ff69b4, 0 0 20px #ff1493, 0 0 30px #ff69b4;
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}
+@keyframes pulseGlow {
+  0%, 100% { text-shadow: 0 0 10px #ff69b4, 0 0 20px #ff1493, 0 0 30px #ff69b4; }
+  50% { text-shadow: 0 0 20px #ff69b4, 0 0 30px #ff1493, 0 0 40px #ff69b4; }
+}
+
+/* --- RANDOM SEDUCTIVE BOUNCE for Crush AI title --- */
+.crush-title-animate {
+  animation: randomBounce 3.8s cubic-bezier(.72,-0.23,.33,1.5) infinite alternate;
+  will-change: transform;
+  display: flex;
+  align-items: center;
+}
+@keyframes randomBounce {
+    0%   { transform: translateX(0) translateY(0) scale(1); }
+    9%   { transform: translateX(-10px) translateY(-8px) scale(1.02); }
+    23%  { transform: translateX(16px) translateY(12px) scale(1.01);}
+    37%  { transform: translateX(-22px) translateY(-8px) scale(0.97);}
+    52%  { transform: translateX(7px) translateY(16px) scale(1.03);}
+    61%  { transform: translateX(0px) translateY(-13px) scale(1.11);}
+    76%  { transform: translateX(22px) translateY(4px) scale(0.99);}
+    89%  { transform: translateX(-12px) translateY(8px) scale(1.07);}
+    100% { transform: translateX(0) translateY(0) scale(1); }
+}
+.crush-title-heart {
+  animation: float-bounce-heart 2.5s cubic-bezier(.68,-0.55,.27,1.55) infinite alternate;
+  display: inline-block;
+  font-size: 2.6rem;
+  filter: drop-shadow(0 0 7px #ff69b4);
+}
+@keyframes float-bounce-heart {
+  0%,100% { transform: scale(1) rotate(-5deg);}
+  10%  { transform: scale(1.09) rotate(7deg);}
+  20%  { transform: scale(1.2) rotate(-4deg);}
+  30%  { transform: scale(1.09) rotate(6deg);}
+  50%  { transform: scale(1.12) rotate(-5deg);}
+  70%  { transform: scale(1.04) rotate(5deg);}
+  90%  { transform: scale(1.17) rotate(-7deg);}
+}
+#title-wrapper {
+  position: absolute;
+  top: 2rem;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  text-align: center;
+  z-index: 50;
+}
+#title-wrapper h1 {
+  font-size: 3rem;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 0 10px #ff99cc;
+  animation: bounce 2s infinite;
+}
+@keyframes bounce {
+  0%, 100% { transform: translateY(0);}
+  50% { transform: translateY(-6px);}
+}
+
+/* --- TAGLINE NEON PURPLE GLOW --- */
+.neon-tagline {
+  color: #e7d6fe;
+  text-shadow:
+    0 0 10px #d2a8ff,
+    0 0 18px #9e6fff,
+    0 0 38px #b882fd,
+    0 0 44px #9f38ff,
+    0 0 62px #ae6dfe;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  filter: brightness(1.15) saturate(1.2);
+}
+
+
+@keyframes neonPulse {
+  0%, 100% {
+    filter: brightness(1.3) saturate(1.2);
+    text-shadow:
+      0 0 6px #fff,
+      0 0 12px #a259c5,
+      0 0 22px #c799ff,
+      0 0 44px #ae6dfe,
+      0 0 60px #a865ff;
+  }
+  60% {
+    filter: brightness(2) saturate(2);
+    text-shadow:
+      0 0 18px #fff,
+      0 0 36px #d6b4fd,
+      0 0 52px #b88cfa,
+      0 0 72px #ba82ff,
+      0 0 88px #a865ff;
+  }
+}
+
+/* ----- ANIMATED GRADIENT BORDERS (NO WHITE!) ----- */
+.animated-gradient-border {
+  border: 2.5px solid transparent;
+  border-radius: 2rem;
+  padding: 0.5rem;
+  background: linear-gradient(120deg, #ff69b4, #ffb6c1, #ba68c8, #ff69b4) border-box;
+  animation: gradientBorderAnim 7s linear infinite;
+}
+@keyframes gradientBorderAnim {
+  0%   { border-image: linear-gradient(120deg, #ff69b4, #ffb6c1, #ba68c8, #ff69b4) 1;}
+  100% { border-image: linear-gradient(360deg, #ff69b4, #ffb6c1, #ba68c8, #ff69b4) 1;}
+}
+
+/* ----- CHAT BUBBLES ----- */
+.sexy-user-bubble {
+  background: linear-gradient(120deg, #ff69b4 0%, #ffb6c1 100%);
+  color: #fff;
+  text-shadow: 0 2px 8px #ad1457, 0 0 1px #000;
+  border-radius: 2rem 2rem 2rem 0.5rem;
+  font-family: 'Poppins', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  margin-left: auto;
+  margin-right: 0;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  max-width: 80%;
+  padding: 1rem 1.4rem;
+  box-shadow: 0 4px 18px 0 #ff69b470, 0 2px 1px 0 #ffb6c180;
+  display: inline-block;
+  word-break: break-word;
+  animation: sexyPopIn 0.3s;
+}
+@keyframes sexyPopIn {
+  0% { transform: scale(0.9) translateY(30px); opacity: 0.2; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+/* Flirty AI bubble: ONLY gradient moves! */
+.flirty-animated-bubble {
+  background: linear-gradient(120deg, #f8bbd0 0%, #f06292 40%, #a259c5 100%);
+  background-size: 250% 250%;
+  animation: aiBubbleGradientMove 5s ease-in-out infinite;
+  color: #fff;
+  text-shadow: 0 2px 12px #ad1457, 0 0 1px #000;
+  border-radius: 2rem 2rem 0.5rem 2rem;
+  font-family: 'Poppins', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  margin-right: auto;
+  margin-left: 0;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  max-width: 80%;
+  padding: 1rem 1.4rem;
+  box-shadow: 0 4px 18px 0 #f0629270, 0 2px 1px 0 #f8bbd080;
+  display: inline-block;
+  word-break: break-word;
+}
+@keyframes aiBubbleGradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ----- INPUT & EMOJI BAR ----- */
+input::placeholder, textarea::placeholder {
+  color: #ff69b4 !important;
+  font-style: italic;
+  font-family: 'Poppins', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.08rem;
+  opacity: 0.93;
+}
+.flirty-input::placeholder {
+  color: #ff69b4;
+  font-style: italic;
+  opacity: 0.98;
+  transition: color 0.3s;
+}
+.flirty-input:focus::placeholder {
+  color: #ffb6c1;
+}
+.flirty-input {
+  background: linear-gradient(120deg, #fff0fc 0%, #ffe6fa 40%, #ffb6e0 100%);
+  background-size: 200% 200%;
+  animation: inputGradientMove 4s ease-in-out infinite;
+  color: #b8005a;
+  font-weight: 500;
+  border: none !important;
+  transition: background 0.4s;
+}
+.flirty-input:focus {
+  background: linear-gradient(120deg, #ffe6fa 0%, #ffb6e0 80%, #ffd6f7 100%);
+  background-size: 200% 200%;
+  animation: inputGradientMove 2.5s ease-in-out infinite;
+  outline: none !important;
+}
+@keyframes inputGradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.emoji-suggestion-bar {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.6rem;
+  user-select: none;
+  animation: emojiPopIn 0.7s;
+}
+.emoji-suggestion-bar span {
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.emoji-suggestion-bar span:hover {
+  transform: scale(1.25) rotate(-6deg);
+  text-shadow: 0 2px 10px #ff69b4, 0 0 3px #fff;
+}
+@keyframes emojiPopIn {
+  from { opacity: 0; transform: translateY(30px);}
+  to   { opacity: 1; transform: translateY(0);}
+}
+
+/* ----- UNLOCK CARDS ----- */
+.unlock-heart {
+  position: absolute;
+  top: 0.7rem; right: 0.7rem;
+  font-size: 1.5rem;
+  z-index: 3;
+  color: #ff69b4;
+  filter: drop-shadow(0 0 6px #ffb6c1);
+  animation: heartPulse 1.5s infinite alternate;
+  transition: filter 0.16s;
+}
+.unlock-card:hover .unlock-heart {
+  filter: drop-shadow(0 0 18px #ff69b4) brightness(1.6);
+  animation: heartPulseActive 0.6s infinite alternate;
+}
+@keyframes heartPulse {
+  0% { transform: scale(1) rotate(-12deg);}
+  45% { transform: scale(1.25) rotate(8deg);}
+  100% { transform: scale(1) rotate(-7deg);}
+}
+@keyframes heartPulseActive {
+  0% { transform: scale(1.1) rotate(-4deg);}
+  70% { transform: scale(1.3) rotate(16deg);}
+  100% { transform: scale(1.11) rotate(-10deg);}
+}
+
+@keyframes floatEmoji {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateY(30px);
+    filter: blur(1px);
+  }
+  10% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1.08) translateY(0px) rotate(-8deg);
+  }
+  70% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1.1) translateY(-30px) rotate(6deg);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(1.15) translateY(-60px) rotate(-8deg);
+  }
+}
+.floating-emoji {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  animation: floatEmojiFlirty 2.15s cubic-bezier(.62,.12,.39,1.09) forwards;
+  will-change: transform, opacity, filter;
+  filter: drop-shadow(0 0 18px #a259c5cc) drop-shadow(0 0 10px #fff3);
+  /* Optional: add slight wiggle on a few with JS for extra randomness! */
+}
+
+@keyframes floatEmojiFlirty {
+  0% {
+    opacity: 0;
+    transform: translateY(35px) scale(0.95) rotate(-13deg);
+    filter: blur(3px) drop-shadow(0 0 24px #a259c566);
+  }
+  18% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(9px) scale(1.03) rotate(7deg);
+  }
+  85% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(-6px) scale(1.08) rotate(-5deg);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(3px) drop-shadow(0 0 30px #e78bff99);
+    transform: translateY(-46px) scale(0.90) rotate(8deg);
+  }
+}
+.floating-emoji-flash {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  animation: emojiFlashFade 1.6s linear forwards;
+  will-change: opacity;
+  transition: opacity 0.4s;
+}
+@keyframes emojiFlashFade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+
+/* ----- SHIMMER ON CARDS & CHAT ----- */
+.shimmer {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.shimmer::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -100%; left: -100%; width: 200%; height: 200%;
+  background: linear-gradient(120deg, rgba(255,255,255,0.00) 60%, rgba(255,255,255,0.16) 80%, rgba(255,255,255,0.00) 100%);
+  transform: rotate(12deg);
+  animation: shimmerMove 7s ease-in-out infinite;
+}
+@keyframes shimmerMove {
+  0%   { transform: translateX(-60%) translateY(-40%) rotate(12deg);}
+  65%  { transform: translateX(70%) translateY(30%) rotate(12deg);}
+  100% { transform: translateX(120%) translateY(80%) rotate(12deg);}
+}
+
+/* ----- MISC, INPUT, FADE-IN ----- */
+input:focus, textarea:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 4px #ff69b4b0, 0 0 16px #ffb6c1, 0 0 6px #fff inset;
+  animation: inputPulse 1.7s infinite alternate;
+}
+@keyframes inputPulse {
+  0%   { box-shadow: 0 0 0 4px #ff69b4b0, 0 0 6px #ffb6c1, 0 0 6px #fff inset; }
+  70%  { box-shadow: 0 0 0 7px #ff69b4e5, 0 0 24px #ffb6c1, 0 0 12px #fff inset;}
+  100% { box-shadow: 0 0 0 4px #ff69b4b0, 0 0 6px #ffb6c1, 0 0 6px #fff inset;}
+}
+/* Chat input always visible */
+input[type="text"], textarea {
+  color: #333 !important;
+}
+input[type="text"], input[type="text"]::placeholder {
+  color: #000 !important;
+}
+.fade-in {
+  color: #fff;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
+}
+.kiss-animate {
+  display: inline-block;
+  font-size: 2.7rem;         /* Slightly larger */
+  animation: kissPop 2.5s infinite cubic-bezier(.72,-0.23,.33,1.5);
+  transform-origin: 60% 60%;
+  filter: drop-shadow(0 0 7px #ff69b4);
+  will-change: transform;
+}
+
+@keyframes kissPop {
+  0%, 85%, 100% {
+    transform: scale(1) rotate(0deg);
+  }
+  10% {
+    transform: scale(1.25) rotate(-8deg);
+  }
+  15% {
+    transform: scale(0.92) rotate(12deg);
+  }
+  20% {
+    transform: scale(1.1) rotate(-7deg);
+  }
+  30% {
+    transform: scale(1.17) rotate(6deg);
+  }
+  38% {
+    transform: scale(1.08) rotate(-3deg);
+  }
+  42% {
+    transform: scale(1.13) rotate(5deg);
+  }
+  60% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.cupid-arrow {
+  position: absolute;
+  top: 112px; /* adjust to align with cupids */
+  left: 13vw; /* starts at female cupid's bow */
+  width: 74vw; /* span across */
+  height: 0;
+  pointer-events: none;
+  z-index: 24;
+}
+
+.flirty-top-nav {
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  gap: 4.5rem;
+  margin-top: 2.2rem;
+  margin-bottom: 0.5rem;
+  position: relative;
+  z-index: 42;
+}
+
+.flirty-nav-tile {
+  display: flex;
+  align-items: center;
+  padding: 0.65rem 1.45rem;
+  border-radius: 2.3rem;
+  font-family: 'Poppins', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.09rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 2px 10px #ff69b4, 0 0 2px #fff;
+  background: linear-gradient(120deg, #ff69b4 15%, #d492ff 90%);
+  box-shadow: 0 0 18px 0 #e78bff70, 0 2px 1px 0 #a259c180;
+  transition: transform 0.16s, box-shadow 0.18s, filter 0.2s;
+  border: 1.7px solid rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+}
+.flirty-nav-tile:hover {
+  transform: scale(1.11) rotate(-4deg);
+  box-shadow: 0 0 32px 4px #ff69b4a8, 0 0 18px #fff3;
+  filter: brightness(1.14) saturate(1.09);
+  background: linear-gradient(120deg, #ff69b4 0%, #ffb6d5 100%);
+  color: #fff8fd;
+  text-decoration: none;
+}
+.crush-social-bar-centered {
+  display: flex;
+  flex-direction: row;
+  gap: 1.2rem;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto;
+  /* LOWER THIS MUCH MORE (try 5.6rem for a big drop!) */
+  margin-top: 5.6rem;
+  margin-bottom: 1.3rem;
+  z-index: 40;
+}
+
+.crush-social-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2.5rem;
+  border: 2px solid #fa1a81;
+  background: rgba(255, 0, 120, 0.04); /* A *subtle* pink transparent glow! */
+  box-shadow: 0 0 16px #ffb6e040, 0 2px 8px #fa1a8140;
+  transition: box-shadow 0.18s, transform 0.13s, background 0.19s;
+  width: 48px;
+  height: 48px;
+  margin: 0 0.08rem;
+  cursor: pointer;
+  position: relative;
+  overflow: visible;
+}
+
+.crush-social-btn:hover {
+  box-shadow: 0 0 30px #fa1a81cc, 0 2px 16px #ffb6e099;
+  transform: scale(1.12) rotate(-6deg);
+  border-color: #ff42b7;
+  background: rgba(255, 0, 120, 0.15);
+}
+
+@keyframes arrow-fly-right {
+  0% { left: 11vw; opacity: 0;}
+  10% { left: 13vw; opacity: 1;}
+  87% { left: 74vw; opacity: 1;}
+  100% { left: 80vw; opacity: 0;}
+}
+.cupid-arrow {
+  pointer-events: none;
+  user-select: none;
+  color: #fa1a81 !important;
+  text-shadow: 0 0 10px #fa1a81, 0 0 24px #fff0fc;
+}
+
+.flirt-xp-bar-outer {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 20px;
+  padding: 1.3rem 1.2rem 1.5rem;
+  max-width: 420px;
+  margin: 1rem auto 1.5rem;
+  box-shadow: 0 0 18px #fa1a8170, 0 0 48px #e098f880;
+  backdrop-filter: blur(12px);
+  text-align: center;
+}
+
+.flirt-xp-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.flirt-xp-badge {
+  background: linear-gradient(145deg, #fa1a81, #e098f8);
+  padding: 0.5rem 1.2rem;
+  border-radius: 18px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: white;
+  box-shadow: 0 0 12px #fa1a81aa;
+  text-shadow: 0 0 4px #fff;
+}
+
+.flirt-xp-score {
+  color: #fff;
+  font-size: 0.97rem;
+  font-weight: 600;
+  opacity: 0.88;
+  text-shadow: 0 0 3px #fa1a81;
+}
+
+.flirt-xp-bar-bg {
+  background: #fff2;
+  border-radius: 999px;
+  height: 14px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.flirt-xp-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,#fa1a81,#ffb6d5,#e098f8,#b5fffc);
+  transition: width 0.4s ease;
+  box-shadow: 0 0 6px #fa1a81, 0 0 12px #e098f8;
+}
+
+
+
+@keyframes xp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+.flirt-leaderboard-container {
+  background: linear-gradient(145deg, #fa1a8190, #e098f880);
+  border-radius: 22px;
+  padding: 1.8rem;
+  max-width: 440px;
+  margin: 2.5rem auto;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 24px #fa1a8190, 0 0 48px #e098f880;
+  animation: pop-in 0.6s ease-out;
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: translateY(12px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.leaderboard-title {
+  font-size: 1.7rem;
+  font-weight: bold;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 0 10px #ff7ecf, 0 0 20px #ffadef;
+  margin-bottom: 1.4rem;
+}
+
+.leaderboard-entry {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  margin-bottom: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #fff;
+  font-size: 1rem;
+  box-shadow: 0 2px 10px rgba(250, 26, 129, 0.15);
+  transition: transform 0.2s ease;
+}
+.leaderboard-entry:hover {
+  transform: scale(1.03);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.leaderboard-entry .rank {
+  font-weight: bold;
+  font-size: 1.2rem;
+  color: #fff5;
+}
+
+.leaderboard-entry .name {
+  font-weight: 600;
+  flex: 1;
+  margin-left: 0.8rem;
+  text-shadow: 0 0 4px #fa1a81aa;
+}
+
+.leaderboard-entry .xp {
+  color: #ffb6d5;
+  font-weight: 500;
+  margin-right: 0.6rem;
+}
+
+.leaderboard-entry .badge {
+  font-size: 1.2rem;
+  animation: heart-pop 3s infinite ease-in-out;
+}
+.xp-bar-bg {
+  width: 100%;
+  height: 10px;
+  background: #ffffff22;
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 0 6px #fa1a8133;
+}
+
+.xp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg,#fa1a81,#ffb6d5,#e098f8,#b5fffc);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+  box-shadow: 0 0 4px #fa1a81;
+}
+
+
+@keyframes heart-pop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.cupid-img {
+  position: absolute;
+  width: 108px;
+  height: auto;
+  z-index: 41;
+  /* Default top for desktop */
+}
+
+.cupid-left {
+  top: 105px;
+  left: 6vw;
+}
+.cupid-right {
+  top: 110px;
+  right: 6vw;
+}
+
+
+/* --- Responsive: Lower the cupids below nav on small screens --- */
+@media (max-width: 900px) {
+  .cupid-left {
+    top: 74px;
+  }
+  .cupid-right {
+    top: 76px;
+  }
+}
+@media (max-width: 600px) {
+  .cupid-left {
+    top: 98px;
+    left: 2vw;
+    width: 84px;
+  }
+  .cupid-right {
+    top: 100px;
+    right: 2vw;
+    width: 84px;
+  }
+}
+/* --- Responsive Nav Improvements --- */
+@media (max-width: 1200px) {
+  .flirty-top-nav {
+    gap: 2.2rem;
+    font-size: 1rem;
+  }
+}
+@media (max-width: 900px) {
+  .flirty-top-nav {
+    gap: 1.1rem;
+    font-size: 0.98rem;
+    flex-wrap: wrap;
+    padding: 0 0.5rem;
+  }
+  .cupid-left { top: 84px; }
+  .cupid-right { top: 88px; }
+}
+
+@media (max-width: 700px) {
+  .flirty-top-nav {
+    gap: 0.5rem;
+    font-size: 0.93rem;
+    flex-wrap: wrap;
+    padding: 0 0.2rem;
+  }
+  .cupid-left { top: 120px; left: 2vw; width: 64px; }
+  .cupid-right { top: 120px; right: 2vw; width: 64px; }
+  .flirty-nav-tile {
+    font-size: 0.92rem;
+    padding: 0.36rem 0.62rem;
+    min-width: 98px;
+  }
+}
+
+/* For the tightest screens */
+@media (max-width: 470px) {
+  .flirty-top-nav {
+    gap: 0.13rem;
+    font-size: 0.87rem;
+    flex-wrap: wrap;
+    padding: 0 0.01rem;
+  }
+  .cupid-left { top: 138px; left: 0vw; width: 44px; }
+  .cupid-right { top: 138px; right: 0vw; width: 44px; }
+  .flirty-nav-tile {
+    font-size: 0.83rem;
+    padding: 0.28rem 0.31rem;
+    min-width: 77px;
+  }
+}
+/* Buttons / inputs baseline */
+:focus-visible { outline: 2px solid #ffb6d5; outline-offset: 3px; border-radius: 10px; }
+
+/* Chat bubbles */
+.flirty-animated-bubble{
+  background: rgba(255, 192, 203, 0.14);
+  border: 1px solid rgba(255, 105, 180, 0.25);
+  padding: .8rem 1rem;
+  border-radius: 14px;
+  color: #ffd6e9;
+  box-shadow: 0 6px 24px rgba(250, 26, 129, 0.12);
+  backdrop-filter: blur(6px);
+}
+.sexy-user-bubble{
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255,255,255,.15);
+  padding: .8rem 1rem;
+  border-radius: 14px;
+  color: #fff;
+  margin-left: auto;
+  box-shadow: 0 6px 24px rgba(255,255,255,0.05);
+}
+.flirty-input{
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce){
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+
+
+
+
+
+

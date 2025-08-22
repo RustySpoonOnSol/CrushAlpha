@@ -1,0 +1,4 @@
+.env*
+Supabase password.txt
+.next
+node_modules
