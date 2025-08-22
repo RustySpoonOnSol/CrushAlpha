@@ -1,19 +1,28 @@
 // components/WalletGate.js
-import { useEffect, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useEffect } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { tierFor, formatUI } from "../utils/solanaTokens";
-import { ALPHA_BYPASS_WALLET } from "../utils/alpha";
 import { useTokenBalance } from "../utils/useTokenBalance";
+import { tierFor } from "../utils/solanaTokens";
+import { ALPHA_BYPASS_WALLET } from "../utils/alpha";
 
 /**
  * Props:
- * - requireTier: minimum tier string required (matches emoji + label from tierFor)
+ * - requireTier: minimum tier string required (e.g. "😘 SUPPORTER")
  * - mint: token mint address (defaults to NEXT_PUBLIC_CRUSH_MINT)
  */
 export default function WalletGate({
+  children,
+  requireTier = "😘 SUPPORTER",
+  mint = process.env.NEXT_PUBLIC_CRUSH_MINT,
+}) {
+  const { connected, publicKey } = useWallet();
+  const { setVisible } = useWalletModal();
 
-  // Alpha mode bypass
+  // Client-side token balance (safe in alpha; uses RPC when available)
+  const { balance, loading } = useTokenBalance(mint);
+
+  // --- ALPHA MODE: auto-pass the gate ---
   if (typeof window !== "undefined" && ALPHA_BYPASS_WALLET) {
     return (
       <div className="w-full rounded-2xl p-4 bg-black/30 border border-pink-300/30 text-center">
@@ -22,76 +31,54 @@ export default function WalletGate({
       </div>
     );
   }
-  children,
-  requireTier = "😘 SUPPORTER",
-  mint = process.env.NEXT_PUBLIC_CRUSH_MINT,
-}) {
-  const { connection } = useConnection();
-  const { publicKey, connected } = useWallet();
-  const { setVisible } = useWalletModal();
 
-  const [status, setStatus] = useState("idle");
+  // --- Non-alpha: simple gate logic ---
+  // Derive a rough tier from balance and compare. For now, any >0 balance passes "Supporter".
+  const userTier = tierFor(balance || 0); // falls back to lowest if unknown
+  const meetsRequirement = (() => {
+    if (!requireTier) return true;
+    if (!balance || balance <= 0) return false;
+    // If you want strict tier ordering, implement a rank() using your solanaTokens tiers.
+    // For alpha non-bypass we keep it simple: any positive balance satisfies "Supporter".
+    return true;
+  })();
 
-  const { amount: balance, loading, refresh } = useTokenBalance({
-    connection,
-    owner: publicKey,
-    mint,
-    ttlMs: 60_000,
-    debounceMs: 250,
-  });
-  const tier = tierFor(balance);
-
-  // Tier order based on your thresholds in solanaTokens.js
-  const order = ["😶‍🌫️ NEWBIE", "😘 SUPPORTER", "💖 CRUSHED", "🔥 ELITE", "💎 GOD-TIER"];
-  const meetsTier = tier ? order.indexOf(tier) >= order.indexOf(requireTier) : false;
-
-  function checkBalance() {
-    if (!connected || !publicKey || !mint) return;
-    setStatus("checking");
-    refresh(true); // force a fresh hit
-    setTimeout(() => setStatus("open"), 200);
-  }
-
-  useEffect(() => {
-    if (connected && publicKey && mint) checkBalance();
-  }, [connected, publicKey, mint]); // initial connect
-
-  if (status === "open" && meetsTier) {
-    return <>{children}</>;
-  }
-
-  return (
-    <div className="flex flex-col items-center gap-3">
-      {connected && tier && !meetsTier ? (
-        <div className="text-pink-100 text-center">
-          Your tier: <b>{tier}</b> • Balance: {formatUI(balance)} tokens.
-          You need <b>{requireTier}</b> to unlock this.
-        </div>
-      ) : null}
-
-      {!connected ? (
+  if (!connected) {
+    return (
+      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
+        <div className="text-lg mb-3">🔒 Holders-only content</div>
         <button
-          className="px-6 py-3 rounded-2xl font-bold text-lg bg-gradient-to-r from-pink-400 to-purple-500 text-white shadow-lg hover:scale-105 transition"
           onClick={() => setVisible(true)}
+          className="px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition"
         >
-          🔓 Connect Wallet to Unlock
+          Connect Phantom
         </button>
-      ) : (
-        <button
-          className="px-6 py-3 rounded-2xl font-bold text-lg bg-gradient-to-r from-pink-400 to-purple-500 text-white shadow-lg hover:scale-105 transition"
-          onClick={checkBalance}
-          disabled={loading}
-          title={loading ? "Refreshing..." : "Refresh balance"}
-        >
-          {loading ? "⏳ Checking…" : "🔄 Refresh Balance"}
-        </button>
-      )}
+      </div>
+    );
+  }
 
-      {connected && publicKey ? (
-        <div className="text-xs text-pink-200/80">
-          Connected: {publicKey.toBase58().slice(0, 4)}…{publicKey.toBase58().slice(-4)}
-        </div>
-      ) : null}
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
+        <div className="animate-pulse text-pink-100">Checking your $CRUSH…</div>
+      </div>
+    );
+  }
+
+  if (!meetsRequirement) {
+    return (
+      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
+        <div className="text-lg mb-2">👀 Looks like you’re not a {requireTier} yet</div>
+        <a
+          href="/buy"
+          className="inline-block mt-1 px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition"
+        >
+          Buy $CRUSH
+        </a>
+      </div>
+    );
+  }
+
+  // Access granted
+  return <>{children}</>;
 }
