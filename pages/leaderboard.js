@@ -2,9 +2,14 @@
 import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { createClient } from '@supabase/supabase-js';
 
 /* ---------- ENV / RPC (holders uses Helius when present) ---------- */
 const CRUSH_MINT = (process.env.NEXT_PUBLIC_CRUSH_MINT || "").replace(/:$/, "");
+
+const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPA_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supa = (SUPA_URL && SUPA_ANON) ? createClient(SUPA_URL, SUPA_ANON, { auth: { persistSession:false } }) : null;
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY;
 const HELIUS_RPC_URL = HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
@@ -101,11 +106,22 @@ export default function LeaderboardPage(){
   const [holdersLoading,setHoldersLoading] = useState(true);
 
   async function fetchTopHolders(){
-    if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
-      setHolders([]); setAllHolders([]); setHoldersLoading(false); return;
-    }
     try{
       setHoldersLoading(true);
+      if (CRUSH_MINT) {
+        try {
+          const r = await fetch(`/api/holders/top?mint=${encodeURIComponent(CRUSH_MINT)}&limit=25`);
+          if (r.ok) {
+            const j = await r.json();
+            const list = (j?.holders||[]).map((h,i)=>({ rank:i+1, wallet:h.wallet, amount:h.amount }));
+            setHolders(list); setAllHolders(list);
+            return;
+          }
+        } catch(_) {}
+      }
+      if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
+        setHolders([]); setAllHolders([]); return;
+      }
       const perPage=1000; let page=1; let decimals=0;
       const totals=new Map(); const MAX_PAGES=10;
       while(page<=MAX_PAGES){
@@ -123,20 +139,24 @@ export default function LeaderboardPage(){
         for(const acc of accounts){
           const owner=acc?.owner;
           const amtRaw=Number(acc?.amount || 0);
-          if(acc?.decimals!=null) decimals=Math.max(decimals,acc.decimals);
+          if(acc?.decimals!=null) decimals=Math.max(decimals, acc.decimals);
           if(owner) totals.set(owner,(totals.get(owner)||0)+amtRaw);
         }
         if(accounts.length<perPage) break;
         page+=1;
       }
-      const allList=Array.from(totals.entries())
-        .map(([wallet,raw])=>({wallet,amount:raw/Math.pow(10,decimals||0)}))
+      const list=Array.from(totals.entries())
+        .map(([wallet,raw])=>({wallet,amount: raw/Math.pow(10,decimals||0)}))
         .sort((a,b)=>b.amount-a.amount)
-        .map((h,i)=>({rank:i+1,...h}));
-      setAllHolders(allList);
-      setHolders(allList.slice(0,10));
-    }catch(e){ console.error(e); setHolders([]); setAllHolders([]); }
-    finally{ setHoldersLoading(false); }
+        .map((h,i)=>({rank:i+1,...h}))
+        .slice(0,25);
+      setHolders(list); setAllHolders(list);
+    }catch(e){
+      console.error(e);
+      setHolders([]); setAllHolders([]);
+    }finally{
+      setHoldersLoading(false);
+    }
   }
 
   /* ---------- Flirts (XP leaderboard — alpha local/demo) ---------- */
@@ -181,15 +201,57 @@ export default function LeaderboardPage(){
       setFlirtsLoading(true);
       const meName = storedDisplayName;
       const meId = myWallet || guestId || "guest_demo_me";
-      // Build local demo list
-      let normalized = buildLocalFlirts(meName, meId);
 
-      // Update stored display name into my row
-      if (meName) {
-        normalized = normalized.map(r => (r.wallet === meId ? { ...r, name: meName } : r));
+      if (supa) {
+        let rows = [];
+        try {
+          const { data } = await supa
+            .from('leaderboard')
+            .select('wallet,name,xp,level')
+            .order('xp', { ascending:false })
+            .limit(50);
+          rows = data || [];
+        } catch (e) {
+          console.error("Supabase fetch failed", e);
+        }
+        if (!rows.length) {
+          rows = buildLocalFlirts(meName, meId);
+        } else {
+          if (!rows.some(r => r.wallet === meId)) {
+            rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
+          }
+          if (HIDE_ANON_GUEST_ROWS) {
+            rows = rows.filter(r => {
+              const isMyGuest = guestId && r.wallet === guestId;
+              if (isMyGuest) return true;
+              const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
+              const nm = (r.name || "").trim().toLowerCase();
+              const isAnon = !nm || nm === "anonymous";
+              return !(isGuest && isAnon);
+            });
+          }
+          rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
+        }
+
+        rows.forEach(r => {
+          const prev = prevXp.current.get(r.wallet) || 0;
+          if ((r.xp || 0) > prev) {
+            setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
+            setTimeout(() => setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
+          }
+        });
+        prevXp.current = new Map(rows.map(r => [r.wallet, r.xp || 0]));
+        prevRanks.current = new Map(rows.map((r,i)=>[r.wallet,i]));
+
+        const ranked = rows.map((r,i)=>({ ...r, _rank: i+1, _delta: 0 }));
+        setAllFlirts(ranked);
+        setFlirts(ranked.slice(0,25));
+        return;
       }
 
-      // Optionally hide anonymous "guest_" rows (except mine)
+      // Local/demo fallback (no Supabase)
+      let normalized = buildLocalFlirts(meName, meId);
+      if (meName) normalized = normalized.map(r => (r.wallet === meId ? { ...r, name: meName } : r));
       if (HIDE_ANON_GUEST_ROWS) {
         normalized = normalized.filter(r => {
           const isMyGuest = guestId && r.wallet === guestId;
@@ -200,24 +262,19 @@ export default function LeaderboardPage(){
           return !(isGuest && isAnon);
         });
       }
-
-      // Rank & delta
       const ranked = combineSelfRowsStrict(normalized).map((row, idx) => {
         const prevIdx = prevRanks.current.get(row.wallet);
         const delta = typeof prevIdx === "number" ? prevIdx - idx : 0;
         return { ...row, _rank: idx + 1, _delta: delta };
       });
-
-      // Shine for XP increases (we'll simulate a small tick later)
-      ranked.forEach(r=>{
+      ranked.forEach(r => {
         const prev = prevXp.current.get(r.wallet) || 0;
-        if(r.xp > prev){
+        if ((r.xp || 0) > prev) {
           setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
-          setTimeout(()=>setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
+          setTimeout(() => setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
         }
       });
       prevXp.current = new Map(ranked.map(r=>[r.wallet, r.xp||0]));
-
       prevRanks.current = new Map(ranked.map((r,i)=>[r.wallet,i]));
       setAllFlirts(ranked);
       setFlirts(ranked.slice(0,25));
