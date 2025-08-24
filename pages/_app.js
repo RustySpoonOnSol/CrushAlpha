@@ -1,5 +1,7 @@
 // pages/_app.js
 import '../styles/globals.css';
+import '../lib/patches/rpc-redirect'; // <-- stops public RPC calls in the browser
+
 import Layout from '../components/Layout';
 import dynamic from 'next/dynamic';
 

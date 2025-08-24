@@ -1,7 +1,6 @@
 // components/SolanaWalletProvider.js
 import { useMemo } from "react";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 
 // Wallet adapter UI styles (modal, buttons, etc.)
@@ -15,8 +14,8 @@ export default function SolanaWalletProvider({ children }) {
     process.env.SOLANA_RPC_FALLBACK ||
     "https://api.mainnet-beta.solana.com";
 
-  // Only include the wallets you actually want (Phantom for now)
-  const wallets = useMemo(() => [new PhantomWalletAdapter()], []);
+  // Don't register Phantom explicitly — Wallet Standard auto-registers it.
+  const wallets = useMemo(() => [], []);
 
   return (
     <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed" }}>

@@ -1,56 +1,36 @@
-import jwt from "jsonwebtoken";
-import { getConnection, getFallbackConnection, asPublicKey } from "../../../utils/solana";
-import { PublicKey } from "@solana/web3.js";
-
-const MINT = process.env.CRUSH_MINT;
-const JWT_SECRET = process.env.JWT_SECRET;
-const TTL = parseInt(process.env.JWT_TTL_SECONDS || "900", 10);
-
-const TIERS = [
-  { name: "GOD-TIER", min: 100000 },
-  { name: "ELITE",    min: 10000  },
-  { name: "CRUSHED",  min: 1000   },
-  { name: "SUPPORTER",min: 1      },
-];
+// pages/api/holdings/verify.js
+export const config = { runtime: 'nodejs' };
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-    const { wallet } = JSON.parse(req.body || "{}");
-    if (!wallet) return res.status(400).json({ error: "Missing wallet" });
+    const owner = req.query.owner || (req.body && JSON.parse(req.body || '{}').owner) || '';
+    const mint  = req.query.mint  || (req.body && JSON.parse(req.body || '{}').mint ) || '';
+    if (!owner || !mint) return res.status(400).json({ error: 'owner & mint required' });
 
-    const owner = asPublicKey(wallet);
-    const mintPk = asPublicKey(MINT);
-    let amount = 0;
+    const RPC =
+      process.env.SOLANA_RPC_PRIMARY ||
+      process.env.NEXT_PUBLIC_SOLANA_RPC ||
+      'https://api.mainnet-beta.solana.com';
 
-    // try primary, then fallback
-    const conns = [getConnection(), getFallbackConnection()];
-    let lastErr;
-    for (const conn of conns) {
-      try {
-        const resp = await conn.getParsedTokenAccountsByOwner(owner, { mint: mintPk });
-        for (const a of resp.value) {
-          const uiAmt = a?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-          amount += uiAmt;
-        }
-        lastErr = null;
-        break;
-      } catch (e) { lastErr = e; }
-    }
-    if (lastErr) throw lastErr;
+    const r = await fetch(RPC, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [owner, { mint }, { encoding: 'jsonParsed' }],
+      }),
+    }).then(x => x.json());
 
-    let tier = "NEWBIE";
-    for (const t of TIERS) if (amount >= t.min) { tier = t.name; break; }
+    const accounts = r?.result?.value || [];
+    const amount = accounts.reduce((sum, a) => {
+      const ui = a?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+      return sum + Number(ui);
+    }, 0);
 
-    const token = jwt.sign(
-      { w: wallet, bal: amount, tier },
-      JWT_SECRET,
-      { expiresIn: TTL }
-    );
-
-    return res.status(200).json({ ok: true, balance: amount, tier, token, ttl: TTL });
-  } catch (e) {
-    console.error("[verify] error", e);
-    return res.status(500).json({ error: "Verification failed" });
+    res.status(200).json({ amount });
+  } catch {
+    res.status(500).json({ error: 'verify failed' });
   }
 }
