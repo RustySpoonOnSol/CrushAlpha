@@ -2,14 +2,9 @@
 import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { createClient } from '@supabase/supabase-js';
 
 /* ---------- ENV / RPC (holders uses Helius when present) ---------- */
 const CRUSH_MINT = (process.env.NEXT_PUBLIC_CRUSH_MINT || "").replace(/:$/, "");
-
-const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPA_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supa = (SUPA_URL && SUPA_ANON) ? createClient(SUPA_URL, SUPA_ANON, { auth: { persistSession:false } }) : null;
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY;
 const HELIUS_RPC_URL = HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
@@ -18,7 +13,6 @@ const HELIUS_RPC_URL = HELIUS_API_KEY
 /* ---------- localStorage keys ---------- */
 const LS_GUEST_ID_KEY = "crush_guest_id";
 const LS_DISPLAY_NAME_KEY = "crush_display_name";
-const LS_MERGED_KEY = "crush_guest_merged";
 
 /* ---------- UI guards ---------- */
 const SOFT_BAN = [
@@ -30,7 +24,7 @@ const RESERVED_EXACT = ["anonymous","guest","user","null","undefined"];
 /* ---------- SETTINGS ---------- */
 const HIDE_ANON_GUEST_ROWS = true;
 
-/* ---------- Demo leaderboard (alpha: no Supabase) ---------- */
+/* ---------- Demo leaderboard (alpha fallback) ---------- */
 const DEMO_FLIRTS = [
   { wallet: "9xp1demo1111111111111111111111111111111", name: "VelvetVibes", xp: 4200, level: 7 },
   { wallet: "9xp2demo2222222222222222222222222222222", name: "HeartSpark", xp: 3100, level: 6 },
@@ -44,7 +38,6 @@ function ensureGuestId() {
   if (typeof window === "undefined") return null;
   let id = localStorage.getItem(LS_GUEST_ID_KEY);
   if (!id) {
-    // lightweight random id
     const buf = new Uint8Array(8);
     (window.crypto || {}).getRandomValues?.(buf);
     id =
@@ -100,7 +93,7 @@ export default function LeaderboardPage(){
 
   const myIdentifier = myWallet || guestId || null;
 
-  /* ---------- Holders ---------- */
+  /* ---------- Holders (server first, Helius fallback) ---------- */
   const [holders,setHolders] = useState([]);
   const [allHolders,setAllHolders] = useState([]);
   const [holdersLoading,setHoldersLoading] = useState(true);
@@ -108,6 +101,7 @@ export default function LeaderboardPage(){
   async function fetchTopHolders(){
     try{
       setHoldersLoading(true);
+      // Prefer your server API (uses your Solana RPC with no CORS)
       if (CRUSH_MINT) {
         try {
           const r = await fetch(`/api/holders/top?mint=${encodeURIComponent(CRUSH_MINT)}&limit=25`);
@@ -119,6 +113,7 @@ export default function LeaderboardPage(){
           }
         } catch(_) {}
       }
+      // Fallback to Helius if configured
       if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
         setHolders([]); setAllHolders([]); return;
       }
@@ -159,7 +154,7 @@ export default function LeaderboardPage(){
     }
   }
 
-  /* ---------- Flirts (XP leaderboard — alpha local/demo) ---------- */
+  /* ---------- Flirts (XP leaderboard via server API) ---------- */
   const [flirts,setFlirts] = useState([]);
   const [allFlirts,setAllFlirts] = useState([]);
   const [flirtsLoading,setFlirtsLoading] = useState(true);
@@ -171,18 +166,10 @@ export default function LeaderboardPage(){
   const buildLocalFlirts = useMemo(() => {
     return (meName, meId) => {
       const base = [...DEMO_FLIRTS];
-      // Ensure no collision with demo wallets
       const meWallet = meId || "guest_demo_me";
-      const meRow = {
-        wallet: meWallet,
-        name: meName || null,
-        xp: 1200,
-        level: 3,
-      };
-      // If me already exists in base (unlikely), replace; else add
+      const meRow = { wallet: meWallet, name: meName || null, xp: 1200, level: 3 };
       const idx = base.findIndex(r => r.wallet === meWallet);
       if (idx >= 0) base[idx] = meRow; else base.push(meRow);
-      // Sort by XP desc and rank
       const ranked = base
         .map(r => ({...r}))
         .sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0))
@@ -192,7 +179,6 @@ export default function LeaderboardPage(){
   }, []);
 
   function combineSelfRowsStrict(rows){
-    // In alpha/local mode, this mainly keeps user row consistent if we ever introduce a guest+wallet combo.
     return rows.slice().sort((a,b)=>(Number(b.xp)||0)-(Number(a.xp)||0));
   }
 
@@ -202,80 +188,52 @@ export default function LeaderboardPage(){
       const meName = storedDisplayName;
       const meId = myWallet || guestId || "guest_demo_me";
 
-      if (supa) {
-        let rows = [];
-        try {
-          const { data } = await supa
-            .from('leaderboard')
-            .select('wallet,name,xp,level')
-            .order('xp', { ascending:false })
-            .limit(50);
-          rows = data || [];
-        } catch (e) {
-          console.error("Supabase fetch failed", e);
+      // Call your server API (reads Supabase on the server; no client createClient)
+      let rows = [];
+      try {
+        const r = await fetch("/api/leaderboard/top", { headers: { "cache-control": "no-cache" } });
+        if (r.ok) {
+          const j = await r.json();
+          rows = Array.isArray(j?.rows) ? j.rows : [];
         }
-        if (!rows.length) {
-          rows = buildLocalFlirts(meName, meId);
-        } else {
-          if (!rows.some(r => r.wallet === meId)) {
-            rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
-          }
-          if (HIDE_ANON_GUEST_ROWS) {
-            rows = rows.filter(r => {
-              const isMyGuest = guestId && r.wallet === guestId;
-              if (isMyGuest) return true;
-              const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
-              const nm = (r.name || "").trim().toLowerCase();
-              const isAnon = !nm || nm === "anonymous";
-              return !(isGuest && isAnon);
-            });
-          }
-          rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
-        }
-
-        rows.forEach(r => {
-          const prev = prevXp.current.get(r.wallet) || 0;
-          if ((r.xp || 0) > prev) {
-            setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
-            setTimeout(() => setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
-          }
-        });
-        prevXp.current = new Map(rows.map(r => [r.wallet, r.xp || 0]));
-        prevRanks.current = new Map(rows.map((r,i)=>[r.wallet,i]));
-
-        const ranked = rows.map((r,i)=>({ ...r, _rank: i+1, _delta: 0 }));
-        setAllFlirts(ranked);
-        setFlirts(ranked.slice(0,25));
-        return;
+      } catch (e) {
+        console.error("Leaderboard API fetch failed", e);
       }
 
-      // Local/demo fallback (no Supabase)
-      let normalized = buildLocalFlirts(meName, meId);
-      if (meName) normalized = normalized.map(r => (r.wallet === meId ? { ...r, name: meName } : r));
-      if (HIDE_ANON_GUEST_ROWS) {
-        normalized = normalized.filter(r => {
-          const isMyGuest = guestId && r.wallet === guestId;
-          if (isMyGuest) return true;
-          const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
-          const nm = (r.name || "").trim().toLowerCase();
-          const isAnon = !nm || nm === "anonymous";
-          return !(isGuest && isAnon);
-        });
+      if (!rows.length) {
+        // Fallback demo list
+        rows = buildLocalFlirts(meName, meId);
+      } else {
+        // Ensure "me" is present
+        if (!rows.some(r => r.wallet === meId)) {
+          rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
+        }
+        // Optional filter
+        if (HIDE_ANON_GUEST_ROWS) {
+          rows = rows.filter(r => {
+            const isMyGuest = guestId && r.wallet === guestId;
+            if (isMyGuest) return true;
+            const isGuest = typeof r.wallet === "string" && r.wallet.startsWith("guest_");
+            const nm = (r.name || "").trim().toLowerCase();
+            const isAnon = !nm || nm === "anonymous";
+            return !(isGuest && isAnon);
+          });
+        }
+        rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
       }
-      const ranked = combineSelfRowsStrict(normalized).map((row, idx) => {
-        const prevIdx = prevRanks.current.get(row.wallet);
-        const delta = typeof prevIdx === "number" ? prevIdx - idx : 0;
-        return { ...row, _rank: idx + 1, _delta: delta };
-      });
-      ranked.forEach(r => {
+
+      // Shine effect on xp increase
+      rows.forEach(r => {
         const prev = prevXp.current.get(r.wallet) || 0;
         if ((r.xp || 0) > prev) {
           setShine(s => { const n = new Set(s); n.add(r.wallet); return n; });
           setTimeout(() => setShine(s => { const n = new Set(s); n.delete(r.wallet); return n; }), 900);
         }
       });
-      prevXp.current = new Map(ranked.map(r=>[r.wallet, r.xp||0]));
-      prevRanks.current = new Map(ranked.map((r,i)=>[r.wallet,i]));
+      prevXp.current = new Map(rows.map(r => [r.wallet, r.xp || 0]));
+      prevRanks.current = new Map(rows.map((r,i)=>[r.wallet,i]));
+
+      const ranked = rows.map((r,i)=>({ ...r, _rank: i+1, _delta: 0 }));
       setAllFlirts(ranked);
       setFlirts(ranked.slice(0,25));
     }catch(e){
@@ -420,22 +378,20 @@ export default function LeaderboardPage(){
   useEffect(()=>{
     fetchTopHolders(); fetchTopFlirts();
 
-    // Simple periodic refresh (local demo + holders polling)
+    // Simple periodic refresh (demo xp tick + holders polling)
     let t1,t2;
     const start=()=>{
       t1=setInterval(()=>{
-        // tiny random tick to demo shine effect on one random row
         setAllFlirts(cur=>{
           if(!cur || !cur.length) return cur;
           const idx = Math.floor(Math.random()*Math.min(cur.length,5));
           const bumped = cur.map((r,i)=> i===idx ? { ...r, xp: (r.xp||0) + Math.floor(Math.random()*6) } : r);
-          // re-rank
           const ranked = bumped.slice().sort((a,b)=>(b.xp||0)-(a.xp||0)).map((r,i)=>({ ...r, _rank:i+1 }));
           return ranked;
         });
-        setFlirts(cur=>{
+        setFlirts(prev => {
           // keep first 25 in sync with allFlirts
-          return (prev => prev.slice(0,25))(allFlirts);
+          return (prev && prev.length) ? prev.slice(0,25) : [];
         });
       }, 5000);
       t2=setInterval(fetchTopHolders,60_000);
@@ -555,13 +511,13 @@ export default function LeaderboardPage(){
             Share to X
           </button>
 
-          {me ? (
-            <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
-              <span className="hrl-label">Flirt rank</span>{" "}
-              <span className="hrl-badge">#{me._rank}</span>{" "}
-              <span className="hrl-sub">Top {percentile}%</span>
-            </div>
-          ) : null}
+            {me ? (
+              <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
+                <span className="hrl-label">Flirt rank</span>{" "}
+                <span className="hrl-badge">#{me._rank}</span>{" "}
+                <span className="hrl-sub">Top {percentile}%</span>
+              </div>
+            ) : null}
         </div>
       </div>
     );
