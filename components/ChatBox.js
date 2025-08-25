@@ -3,11 +3,11 @@
 // - Works with Phantom; signs a short message before chat
 // - Optional alpha bypass via NEXT_PUBLIC_ALPHA_MODE="1"
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const CRUSH_MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
-  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJsk"; // <- fixed (no trailing G)
 
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const ALPHA_MODE =
@@ -23,9 +23,7 @@ function nid(size = 12) {
 
 async function serverBalance(owner, mint) {
   const res = await fetch(
-    `/api/holdings/verify?owner=${encodeURIComponent(
-      owner
-    )}&mint=${encodeURIComponent(mint)}`
+    `/api/holdings/verify?owner=${encodeURIComponent(owner)}&mint=${encodeURIComponent(mint)}`
   );
   if (!res.ok) throw new Error("verify failed");
   const j = await res.json();
@@ -55,20 +53,8 @@ function TypingDots() {
         •
       </span>
       <style jsx>{`
-        .typing-dot {
-          display: inline-block;
-          animation: blink 1s infinite;
-          opacity: 0.2;
-        }
-        @keyframes blink {
-          0%,
-          80% {
-            opacity: 0.2;
-          }
-          40% {
-            opacity: 1;
-          }
-        }
+        .typing-dot { display: inline-block; animation: blink 1s infinite; opacity: 0.2; }
+        @keyframes blink { 0%,80% { opacity: .2; } 40% { opacity: 1; } }
       `}</style>
     </span>
   );
@@ -119,32 +105,17 @@ export default function ChatBox({
   useEffect(() => {
     if (!mounted) return;
     // hydrate chat
+    const hello = { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() };
     if (enablePersistence) {
       try {
         const raw = localStorage.getItem(persistKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) {
-            setMessages(parsed);
-          } else {
-            setMessages([
-              { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() },
-            ]);
-          }
-        } else {
-          setMessages([
-            { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() },
-          ]);
-        }
+        const parsed = raw ? JSON.parse(raw) : [];
+        setMessages(Array.isArray(parsed) && parsed.length ? parsed : [hello]);
       } catch {
-        setMessages([
-          { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() },
-        ]);
+        setMessages([hello]);
       }
     } else {
-      setMessages([
-        { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() },
-      ]);
+      setMessages([hello]);
     }
 
     // try restore wallet
@@ -159,9 +130,7 @@ export default function ChatBox({
           const pk = r?.publicKey?.toString();
           if (pk) {
             setWallet(pk);
-            try {
-              localStorage.setItem("crush_wallet", pk);
-            } catch {}
+            try { localStorage.setItem("crush_wallet", pk); } catch {}
             refreshBalance(pk);
           }
         })
@@ -172,15 +141,12 @@ export default function ChatBox({
   // persist chat
   useEffect(() => {
     if (!mounted || !enablePersistence) return;
-    try {
-      localStorage.setItem(persistKey, JSON.stringify(messages));
-    } catch {}
+    try { localStorage.setItem(persistKey, JSON.stringify(messages)); } catch {}
   }, [messages, mounted, enablePersistence, persistKey]);
 
   // scroll
   useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
+    const el = listRef.current; if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
 
@@ -198,9 +164,7 @@ export default function ChatBox({
       const pk = resp?.publicKey?.toString();
       if (!pk) throw new Error("No public key");
       setWallet(pk);
-      try {
-        localStorage.setItem("crush_wallet", pk);
-      } catch {}
+      try { localStorage.setItem("crush_wallet", pk); } catch {}
       await refreshBalance(pk);
     } catch (e) {
       setGateMsg(e?.message || "Failed to connect wallet");
@@ -208,14 +172,9 @@ export default function ChatBox({
   }
 
   async function disconnectWallet() {
-    try {
-      await window?.solana?.disconnect?.();
-    } catch {}
-    setWallet(null);
-    setBal(0);
-    try {
-      localStorage.removeItem("crush_wallet");
-    } catch {}
+    try { await window?.solana?.disconnect?.(); } catch {}
+    setWallet(null); setBal(0);
+    try { localStorage.removeItem("crush_wallet"); } catch {}
   }
 
   async function refreshBalance(pk = wallet) {
@@ -236,8 +195,7 @@ export default function ChatBox({
   const startCooldown = () => {
     if (cooldownSeconds > 0) {
       const u = Date.now() + cooldownSeconds * 1000;
-      setUntil(u);
-      setCoolLeft(cooldownSeconds);
+      setUntil(u); setCoolLeft(cooldownSeconds);
     }
   };
 
@@ -291,10 +249,7 @@ export default function ChatBox({
     if (!text || loading || sendingRef.current) return;
 
     // live balance gate
-    if (!wallet) {
-      setErr("🔌 Connect Phantom to chat.");
-      return;
-    }
+    if (!wallet) { setErr("🔌 Connect Phantom to chat."); return; }
     try {
       const live = await serverBalance(wallet, CRUSH_MINT);
       setBal(live);
@@ -302,10 +257,7 @@ export default function ChatBox({
         setErr(`🔒 Hold at least ${MIN_HOLD} $CRUSH to chat.`);
         return;
       }
-    } catch {
-      setErr("Balance check failed. Try again.");
-      return;
-    }
+    } catch { setErr("Balance check failed. Try again."); return; }
 
     if (onCooldown()) {
       setErr(`⌛ Please wait ${coolLeft || Math.ceil((until - Date.now()) / 1000)}s.`);
@@ -321,11 +273,7 @@ export default function ChatBox({
     setMessages((p) => [...p, userMsg, { id: aiId, role: "ai", text: "", ts: Date.now() }]);
     setInput("");
 
-    if (typeof onMessageSent === "function") {
-      try {
-        onMessageSent(text);
-      } catch {}
-    }
+    if (typeof onMessageSent === "function") { try { onMessageSent(text); } catch {} }
 
     try {
       if (stream) {
@@ -421,11 +369,7 @@ export default function ChatBox({
       )}
 
       {/* messages */}
-      <div
-        ref={listRef}
-        className="space-y-2 mb-3 max-h-[320px] overflow-y-auto pr-1 custom-scroll"
-        aria-live="polite"
-      >
+      <div ref={listRef} className="space-y-2 mb-3 max-h-[320px] overflow-y-auto pr-1 custom-scroll" aria-live="polite">
         {messages.map((m) =>
           m.role === "ai" ? (
             <div key={m.id} className="flirty-animated-bubble">
@@ -468,9 +412,7 @@ export default function ChatBox({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          placeholder={
-            !gateOpen ? `Hold ${MIN_HOLD}+ $CRUSH to chat` : onCooldown() ? `Wait ${coolLeft}s…` : placeholder
-          }
+          placeholder={!gateOpen ? `Hold ${MIN_HOLD}+ $CRUSH to chat` : onCooldown() ? `Wait ${coolLeft}s…` : placeholder}
           aria-label="Message"
           className="flex-grow p-3 rounded-l-xl flirty-input border-0 focus:outline-none focus:ring-0 resize-none leading-6"
           disabled={disableInput}
@@ -485,31 +427,14 @@ export default function ChatBox({
         </button>
       </div>
 
-      {err ? (
-        <div className="mt-2 text-sm text-pink-200/80" role="alert">
-          {err}
-        </div>
-      ) : null}
+      {err ? <div className="mt-2 text-sm text-pink-200/80" role="alert">{err}</div> : null}
 
       <style jsx>{`
-        .custom-scroll {
-          scrollbar-width: thin;
-          scrollbar-color: #f472b6 #0000;
-        }
-        .custom-scroll::-webkit-scrollbar {
-          width: 8px;
-        }
-        .custom-scroll::-webkit-scrollbar-thumb {
-          border-radius: 20px;
-          background: #f472b6aa;
-        }
+        .custom-scroll { scrollbar-width: thin; scrollbar-color: #f472b6 #0000; }
+        .custom-scroll::-webkit-scrollbar { width: 8px; }
+        .custom-scroll::-webkit-scrollbar-thumb { border-radius: 20px; background: #f472b6aa; }
         @media (prefers-reduced-motion: reduce) {
-          .flirty-animated-bubble,
-          .typing-dot,
-          .animate-pulse {
-            animation: none !important;
-            transition: none !important;
-          }
+          .flirty-animated-bubble, .typing-dot, .animate-pulse { animation: none !important; transition: none !important; }
         }
       `}</style>
     </div>

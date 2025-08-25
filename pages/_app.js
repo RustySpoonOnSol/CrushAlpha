@@ -1,13 +1,12 @@
 // pages/_app.js
-import '../styles/globals.css';
-import '../lib/patches/rpc-redirect'; // <-- stops public RPC calls in the browser
+import "../lib/patches/rpc-redirect"; // <— catch any stray public-RPC calls
+import "../styles/globals.css";
 
-import Layout from '../components/Layout';
-import dynamic from 'next/dynamic';
+import Layout from "../components/Layout";
+import dynamic from "next/dynamic";
 
-// Mount Solana providers client-side only (prevents SSR/hydration issues)
 const SolanaWalletProvider = dynamic(
-  () => import('../components/SolanaWalletProvider'),
+  () => import("../components/SolanaWalletProvider"),
   { ssr: false }
 );
 
