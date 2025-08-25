@@ -1,9 +1,8 @@
 // pages/api/holdings/verify.js
-// Robust server-side balance lookup for a given owner+mint.
-// - Accepts GET (query) and POST (JSON)
-// - Uses your Alchemy RPC (or falls back to public if missing)
-// - Tries both getTokenAccountsByOwner and getParsedProgramAccounts
-// - Supports SPL Token (Tokenkeg...) and Token-2022 (TokenzQd...)
+// Robust balance lookup for Token & Token-2022 on Alchemy-compatible RPCs.
+// - Prefers env mint (avoids wrong query mint).
+// - Uses getTokenAccountsByOwner for both standard Token and Token-2022.
+// - Accepts GET or POST.
 
 export const config = { runtime: "nodejs" };
 
@@ -43,93 +42,81 @@ function sumUiAmount(list) {
 export default async function handler(req, res) {
   try {
     const method = req.method || "GET";
+
+    // Prefer env mint so a bad query param can’t break prod
+    const ENV_MINT =
+      process.env.NEXT_PUBLIC_CRUSH_MINT ||
+      process.env.CRUSH_MINT ||
+      "";
+
     let owner =
       req.query.owner || (req.body && JSON.parse(req.body || "{}").owner) || "";
     let mint =
+      ENV_MINT ||
       req.query.mint ||
-      process.env.CRUSH_MINT ||
-      process.env.NEXT_PUBLIC_CRUSH_MINT ||
+      (req.body && JSON.parse(req.body || "{}").mint) ||
       "";
-
-    if (method === "POST") {
-      const body = JSON.parse(req.body || "{}");
-      owner = body.wallet || body.owner || owner;
-      mint = body.mint || mint;
-    }
 
     if (!owner || !mint) {
       return res.status(400).json({ error: "owner & mint required", owner, mint });
     }
 
-    // 1) Primary: getTokenAccountsByOwner (jsonParsed)
-    const byOwner = await rpcCall({
+    let amount = 0;
+    let accounts = [];
+
+    // (A) Simple path: filter by mint (covers standard Token)
+    const byMint = await rpcCall({
       method: "getTokenAccountsByOwner",
       params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
     });
 
-    if (byOwner?.error) {
-      // continue to fallbacks, but keep the error around
+    if (!byMint?.error) {
+      accounts = byMint?.result?.value || [];
+      amount = sumUiAmount(accounts);
     }
 
-    let accounts = byOwner?.result?.value || [];
-    let amount = sumUiAmount(accounts);
-
-    // 2) Fallback A: Token Program (legacy) via getParsedProgramAccounts
+    // (B) If still zero, check Token-2022: fetch all token-2022 accounts, then filter by mint
     if (amount === 0) {
-      const parsedLegacy = await rpcCall({
-        method: "getParsedProgramAccounts",
+      const byT22 = await rpcCall({
+        method: "getTokenAccountsByOwner",
         params: [
-          TOKEN_PROGRAM,
-          {
-            filters: [
-              { memcmp: { offset: 0, bytes: mint } },   // mint at offset 0
-              { memcmp: { offset: 32, bytes: owner } }, // owner at offset 32
-              { dataSize: 165 }, // classic token account size
-            ],
-            encoding: "jsonParsed",
-            commitment: "confirmed",
-          },
+          owner,
+          { programId: TOKEN_2022_PROGRAM },
+          { encoding: "jsonParsed", commitment: "confirmed" },
         ],
       });
 
-      if (!parsedLegacy?.error && Array.isArray(parsedLegacy?.result)) {
-        amount = sumUiAmount(parsedLegacy.result);
-        if (amount > 0) {
-          accounts = parsedLegacy.result;
-        }
+      if (!byT22?.error && Array.isArray(byT22?.result?.value)) {
+        const filtered = byT22.result.value.filter(
+          (it) => it?.account?.data?.parsed?.info?.mint === mint
+        );
+        amount = sumUiAmount(filtered);
+        if (amount > 0) accounts = filtered;
       }
     }
 
-    // 3) Fallback B: Token-2022 Program via getParsedProgramAccounts (no dataSize; accounts may have extensions)
+    // (C) Last-resort: if provider didn’t support (A) properly, try Token (legacy) program scan
     if (amount === 0) {
-      const parsed2022 = await rpcCall({
-        method: "getParsedProgramAccounts",
+      const byTok = await rpcCall({
+        method: "getTokenAccountsByOwner",
         params: [
-          TOKEN_2022_PROGRAM,
-          {
-            filters: [
-              { memcmp: { offset: 0, bytes: mint } },
-              { memcmp: { offset: 32, bytes: owner } },
-            ],
-            encoding: "jsonParsed",
-            commitment: "confirmed",
-          },
+          owner,
+          { programId: TOKEN_PROGRAM },
+          { encoding: "jsonParsed", commitment: "confirmed" },
         ],
       });
 
-      if (!parsed2022?.error && Array.isArray(parsed2022?.result)) {
-        amount = sumUiAmount(parsed2022.result);
-        if (amount > 0) {
-          accounts = parsed2022.result;
-        }
+      if (!byTok?.error && Array.isArray(byTok?.result?.value)) {
+        const filtered = byTok.result.value.filter(
+          (it) => it?.account?.data?.parsed?.info?.mint === mint
+        );
+        amount = sumUiAmount(filtered);
+        if (amount > 0) accounts = filtered;
       }
     }
 
     res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
-    return res.status(200).json({
-      amount,
-      accounts: accounts.length,
-    });
+    return res.status(200).json({ amount, accounts: accounts.length });
   } catch (e) {
     return res.status(500).json({ error: String(e?.message || e) });
   }
