@@ -1,12 +1,13 @@
 // pages/index.js
-import Head from 'next/head';
-import dynamic from 'next/dynamic';
+import Head from "next/head";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { supabase } from "../utils/supabaseClient";
-import ShareOnX from "../components/ShareOnX"; // one-tap X posting
+import ShareOnX from "../components/ShareOnX";
+import ChatOverlay from "../components/ChatOverlay"; // full-screen overlay
 
-// 🚫 Don't SSR the chatbox to avoid hydration mismatches
-const ChatBox = dynamic(() => import('../components/ChatBox'), { ssr: false });
+// Don't SSR ChatBox to avoid hydration mismatches
+const ChatBox = dynamic(() => import("../components/ChatBox"), { ssr: false });
 
 const EMOJIS = ["💘", "💦", "💋", "❤️", "😘"];
 const LEFT_COUNT = 6;
@@ -14,20 +15,13 @@ const RIGHT_COUNT = 6;
 const CUPID_LEFT_IMG = "/cupid_female.png";
 const CUPID_RIGHT_IMG = "/cupid_male.png";
 
-/* ---------- CONFIG (edit to taste) ---------- */
-const MINT = process.env.NEXT_PUBLIC_CRUSH_MINT || "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
-const HELIUS_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY || "";
-const RPC_FALLBACKS = [
-  process.env.NEXT_PUBLIC_SOLANA_RPC || "",
-  HELIUS_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "",
-  "https://api.mainnet-beta.solana.com",
-].filter(Boolean);
-const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500"); // 🔒 default gate = 500 tokens
+/* ---------- CONFIG ---------- */
+const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500"); // gate = 500 tokens
 
 /* ---------- helpers for client-only emoji bursts ---------- */
 function getSidePositions(side, count) {
   const verticals = Array.from({ length: count }, (_, i) => 10 + i * ((80 - 10) / (count - 1)));
-  const left = side === 'left' ? 5 : 82;
+  const left = side === "left" ? 5 : 82;
   return verticals.map((top) => ({
     top: `${top + Math.random() * 4 - 2}%`,
     left: `${left + Math.random() * 7}%`,
@@ -39,27 +33,27 @@ function getRandomEmojis() {
   const leftEmojis = [...EMOJIS].sort(() => 0.5 - Math.random());
   const rightEmojis = [...EMOJIS].sort(() => 0.5 - Math.random());
 
-  getSidePositions('left', LEFT_COUNT).forEach(pos => {
+  getSidePositions("left", LEFT_COUNT).forEach((pos) => {
     emojis.push({
       id: `l-${idx}`,
       emoji: leftEmojis[idx % EMOJIS.length],
       ...pos,
       fontSize: `${(2.5 + Math.random() * 1.3).toFixed(2)}rem`,
       rotate: `${Math.floor(Math.random() * 28 - 14)}deg`,
-      side: 'left',
+      side: "left",
     });
     idx++;
   });
 
   idx = 0;
-  getSidePositions('right', RIGHT_COUNT).forEach(pos => {
+  getSidePositions("right", RIGHT_COUNT).forEach((pos) => {
     emojis.push({
       id: `r-${idx}`,
       emoji: rightEmojis[idx % EMOJIS.length],
       ...pos,
       fontSize: `${(2.5 + Math.random() * 1.3).toFixed(2)}rem`,
       rotate: `${Math.floor(Math.random() * 28 - 14)}deg`,
-      side: 'right',
+      side: "right",
     });
     idx++;
   });
@@ -69,62 +63,31 @@ function getRandomEmojis() {
 
 /* ---------- XP labels ---------- */
 const LEVEL_LABELS = [
-  "Flirt Rookie", "Sweetheart", "Seduction Pro",
-  "Temptation Queen/King", "Irresistible", "Heartbreaker", "Crush Master"
+  "Flirt Rookie",
+  "Sweetheart",
+  "Seduction Pro",
+  "Temptation Queen/King",
+  "Irresistible",
+  "Heartbreaker",
+  "Crush Master",
 ];
 const XP_LEVELS = [0, 100, 400, 900, 1600, 2500, 3600];
 
-/* ---------- tiny Solana helpers (JSON-RPC with fallbacks) ---------- */
-async function fetchWithTimeout(url, init = {}, ms = 8000) {
-  return Promise.race([
-    fetch(url, init),
-    new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms))
-  ]);
-}
-async function rpc(method, params) {
-  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  const headers = { "content-type": "application/json" };
-  let lastErr;
-  for (const endpoint of RPC_FALLBACKS) {
-    try {
-      const r = await fetchWithTimeout(endpoint, { method: "POST", headers, body }, 8000);
-      const j = await r.json();
-      if (j.error) throw new Error(j.error?.message || "RPC error");
-      return j.result;
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr || new Error("All RPCs failed");
+/* ---------- Server balance helper ---------- */
+async function getCrushBalance(owner) {
+  const r = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(owner)}`, {
+    headers: { "content-type": "application/json" },
+  });
+  const j = await r.json().catch(() => ({}));
+  return Number(j?.amount || 0);
 }
 
-async function getCrushBalance(owner, mint) {
-  const tokAccs = await rpc("getTokenAccountsByOwner", [
-    owner,
-    { mint },
-    { encoding: "jsonParsed" }
-  ]);
-  if (!tokAccs?.value?.length) return 0;
-  let total = 0;
-  for (const v of tokAccs.value) {
-    const parsed = v?.account?.data?.parsed;
-    const ui = parsed?.info?.tokenAmount?.uiAmount || 0;
-    total += Number(ui);
-  }
-  return total;
-}
-
-/* ---------- Floating CTA (always visible) ---------- */
-function FloatingCTA({ wallet, isHolder, connectWallet }) {
+/* ---------- Floating CTA (opens overlay if holder) ---------- */
+function FloatingCTA({ wallet, isHolder, connectWallet, openChat }) {
   function go() {
-    if (!wallet) {
-      connectWallet?.();
-      return;
-    }
-    if (!isHolder) {
-      window.location.href = "/buy";
-      return;
-    }
-    const el = document.getElementById("xenia-chat");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!wallet) return connectWallet?.();
+    if (!isHolder) return (window.location.href = "/buy");
+    openChat?.();
   }
   const label = !wallet ? "Connect Phantom" : !isHolder ? "Get $CRUSH" : "Chat with Xenia";
   return (
@@ -143,7 +106,7 @@ function FloatingCTA({ wallet, isHolder, connectWallet }) {
         color: "#fff",
         fontWeight: 800,
         boxShadow: "0 12px 28px #fa1a8166, 0 3px 10px #00000040",
-        cursor: "pointer"
+        cursor: "pointer",
       }}
     >
       {label}
@@ -153,7 +116,12 @@ function FloatingCTA({ wallet, isHolder, connectWallet }) {
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Full-screen overlay state
+  const [chatOpen, setChatOpen] = useState(false);
 
   /* ---------- WALLET + GATE ---------- */
   const [wallet, setWallet] = useState(null);
@@ -172,7 +140,9 @@ export default function Home() {
       const pubkey = resp?.publicKey?.toString();
       if (!pubkey) throw new Error("No public key");
       setWallet(pubkey);
-      try { localStorage.setItem("crush_wallet", pubkey); } catch {}
+      try {
+        localStorage.setItem("crush_wallet", pubkey);
+      } catch {}
       await refreshBalance(pubkey);
     } catch (e) {
       setGateError(e?.message || "Failed to connect wallet");
@@ -180,10 +150,14 @@ export default function Home() {
   }
 
   async function disconnectWallet() {
-    try { await window?.solana?.disconnect?.(); } catch {}
+    try {
+      await window?.solana?.disconnect?.();
+    } catch {}
     setWallet(null);
     setHoldBalance(0);
-    try { localStorage.removeItem("crush_wallet"); } catch {}
+    try {
+      localStorage.removeItem("crush_wallet");
+    } catch {}
   }
 
   async function refreshBalance(pubkey = wallet) {
@@ -191,9 +165,9 @@ export default function Home() {
     setChecking(true);
     setGateError("");
     try {
-      const bal = await getCrushBalance(pubkey, MINT);
+      const bal = await getCrushBalance(pubkey);
       setHoldBalance(bal);
-    } catch (e) {
+    } catch {
       setGateError("Balance check failed. Try again.");
     } finally {
       setChecking(false);
@@ -208,12 +182,15 @@ export default function Home() {
       setWallet(stored);
       refreshBalance(stored);
     } else if (window?.solana?.isPhantom) {
-      window.solana.connect({ onlyIfTrusted: true })
+      window.solana
+        .connect({ onlyIfTrusted: true })
         .then((r) => {
           const pk = r?.publicKey?.toString();
           if (pk) {
             setWallet(pk);
-            try { localStorage.setItem("crush_wallet", pk); } catch {}
+            try {
+              localStorage.setItem("crush_wallet", pk);
+            } catch {}
             refreshBalance(pk);
           }
         })
@@ -238,7 +215,7 @@ export default function Home() {
     } catch {}
   }, [mounted]);
 
-  // 🔹 Display name (grab username early)
+  // Display name
   const [displayName, setDisplayName] = useState("");
   useEffect(() => {
     try {
@@ -258,9 +235,13 @@ export default function Home() {
       alert("Pick 3–16 characters: letters, numbers, or underscore. 'anonymous' is reserved.");
       return;
     }
-    try { localStorage.setItem("crush_display_name", name); } catch {}
+    try {
+      localStorage.setItem("crush_display_name", name);
+    } catch {}
     setDisplayName(name);
-    try { updateLeaderboard(xp, level); } catch {}
+    try {
+      updateLeaderboard(xp, level);
+    } catch {}
   }
 
   // push latest XP/level to Supabase leaderboard
@@ -283,7 +264,7 @@ export default function Home() {
         wallet: walletId,
         xp: newXp,
         level: newLevel,
-        updated_at: new Date()
+        updated_at: new Date(),
       };
       if (display) payload.name = display;
 
@@ -297,7 +278,7 @@ export default function Home() {
   function handleXpGain(message) {
     const containsEmoji = /[\u{1F300}-\u{1FAFF}]/u.test(message);
     const amount = containsEmoji ? 20 : 10;
-    setXp(prev => {
+    setXp((prev) => {
       let newXp = prev + amount;
       let newLevel = level;
       while (XP_LEVELS[newLevel + 1] && newXp >= XP_LEVELS[newLevel + 1]) {
@@ -315,7 +296,7 @@ export default function Home() {
     });
   }
 
-  const nextLevelXp = XP_LEVELS[level + 1] || (xp + 100);
+  const nextLevelXp = XP_LEVELS[level + 1] || xp + 100;
   const currentLevelXp = XP_LEVELS[level] || 0;
   const barPercent = Math.min(100, Math.round(((xp - currentLevelXp) / (nextLevelXp - currentLevelXp)) * 100));
 
@@ -330,7 +311,7 @@ export default function Home() {
     if (document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let arrowTimeout = null;
     const interval = setInterval(() => {
-      setArrowKey(k => k + 1);
+      setArrowKey((k) => k + 1);
       setArrowVisible(true);
       arrowTimeout = setTimeout(() => setArrowVisible(false), 1700);
     }, 9000);
@@ -357,7 +338,9 @@ export default function Home() {
 
   // Pause/resume FX when tab visibility changes
   useEffect(() => {
-    function onVis() { setArrowKey(k => k); }
+    function onVis() {
+      setArrowKey((k) => k);
+    }
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
@@ -375,7 +358,7 @@ export default function Home() {
             <span
               key={id}
               className="floating-flash-emoji"
-              style={{ top, left, fontSize, position: 'absolute', transform: `rotate(${rotate})`, opacity: 1 }}
+              style={{ top, left, fontSize, position: "absolute", transform: `rotate(${rotate})`, opacity: 1 }}
             >
               {emoji}
             </span>
@@ -404,12 +387,20 @@ export default function Home() {
             key={arrowKey}
             className="cupid-arrow"
             style={{
-              left: "11vw", top: "112px", fontSize: "2.5rem", fontWeight: 700, color: "#fa1a81",
+              left: "11vw",
+              top: "112px",
+              fontSize: "2.5rem",
+              fontWeight: 700,
+              color: "#fa1a81",
               textShadow: "0 0 10px #fa1a81, 0 0 24px #fff0fc",
               animation: "arrow-fly-right 1.7s linear forwards",
-              pointerEvents: "none", userSelect: "none", position: "absolute"
+              pointerEvents: "none",
+              userSelect: "none",
+              position: "absolute",
             }}
-          >➳💘</span>
+          >
+            ➳💘
+          </span>
         )}
       </div>
 
@@ -417,70 +408,106 @@ export default function Home() {
       {mounted && (
         <div className="absolute inset-0 overflow-hidden z-0" aria-hidden="true">
           {[...Array(30)].map((_, i) => (
-            <div key={i} className="sparkle" style={{
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 5}s`
-            }} />
+            <div
+              key={i}
+              className="sparkle"
+              style={{
+                top: `${Math.random() * 100}%`,
+                left: `${Math.random() * 100}%`,
+                animationDelay: `${Math.random() * 5}s`,
+              }}
+            />
           ))}
         </div>
       )}
 
       {/* SOCIAL BAR */}
-      <div className="crush-social-bar-centered" style={{
-        display: "flex", justifyContent: "center", gap: "28px", margin: "0 auto",
-        marginTop: "5.6rem", marginBottom: "-8px", zIndex: 20, position: "relative"
-      }}>
+      <div
+        className="crush-social-bar-centered"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "28px",
+          margin: "0 auto",
+          marginTop: "5.6rem",
+          marginBottom: "-8px",
+          zIndex: 20,
+          position: "relative",
+        }}
+      >
         <a href="https://x.com/CrushAIx" target="_blank" rel="noopener noreferrer" className="crush-social-btn" aria-label="X">
           <svg width="28" height="28" fill="none" viewBox="0 0 32 32">
-            <rect width="32" height="32" rx="16" fill="none"/>
-            <path d="M7 7L25 25M25 7L7 25" stroke="#fa1a81" strokeWidth="3" strokeLinecap="round"/>
+            <rect width="32" height="32" rx="16" fill="none" />
+            <path d="M7 7L25 25M25 7L7 25" stroke="#fa1a81" strokeWidth="3" strokeLinecap="round" />
           </svg>
         </a>
         <a href="https://www.instagram.com/crusha.i" target="_blank" rel="noopener noreferrer" className="crush-social-btn" aria-label="Instagram">
           <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-            <rect x="6" y="6" width="20" height="20" rx="6" stroke="#fa1a81" strokeWidth="2"/>
-            <circle cx="16" cy="16" r="6" stroke="#fa1a81" strokeWidth="2"/>
-            <circle cx="22.2" cy="9.8" r="1.2" fill="#fa1a81"/>
+            <rect x="6" y="6" width="20" height="20" rx="6" stroke="#fa1a81" strokeWidth="2" />
+            <circle cx="16" cy="16" r="6" stroke="#fa1a81" strokeWidth="2" />
+            <circle cx="22.2" cy="9.8" r="1.2" fill="#fa1a81" />
           </svg>
         </a>
         <a href="https://www.tiktok.com/@crush.ai30" target="_blank" rel="noopener noreferrer" className="crush-social-btn" aria-label="TikTok">
           <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-            <path d="M18 9V22C18 24 16 25 14 25C12 25 10 24 10 22C10 20 12 19 14 19" stroke="#fa1a81" strokeWidth="2" strokeLinecap="round"/>
-            <circle cx="22" cy="10" r="2" fill="#fa1a81"/>
+            <path d="M18 9V22C18 24 16 25 14 25C12 25 10 24 10 22C10 20 12 19 14 19" stroke="#fa1a81" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="22" cy="10" r="2" fill="#fa1a81" />
           </svg>
         </a>
         <a href="https://discord.gg/95FeAK9cye" target="_blank" rel="noopener noreferrer" className="crush-social-btn" aria-label="Discord">
           <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-            <rect x="8" y="12" width="16" height="8" rx="4" stroke="#fa1a81" strokeWidth="2"/>
-            <circle cx="13" cy="16" r="1.2" fill="#fa1a81"/>
-            <circle cx="19" cy="16" r="1.2" fill="#fa1a81"/>
+            <rect x="8" y="12" width="16" height="8" rx="4" stroke="#fa1a81" strokeWidth="2" />
+            <circle cx="13" cy="16" r="1.2" fill="#fa1a81" />
+            <circle cx="19" cy="16" r="1.2" fill="#fa1a81" />
           </svg>
         </a>
       </div>
 
       {/* Main Section */}
-      <main className="relative z-10 flex flex-col items-center justify-center min-h-[90vh] p-4" style={{ marginTop: '0px' }}>
-        <div className="flex flex-col items-center mb-2" style={{ marginTop: '1px' }}>
+      <main className="relative z-10 flex flex-col items-center justify-center min-h-[90vh] p-4" style={{ marginTop: "0px" }}>
+        <div className="flex flex-col items-center mb-2" style={{ marginTop: "1px" }}>
           <div className="crush-title-animate flex items-center justify-center">
             <span className="crush-title-heart mr-2">💘</span>
-            <h1 className="title-glow text-5xl font-bold text-white crush-title-text" style={{ display: 'inline-block' }}>
+            <h1 className="title-glow text-5xl font-bold text-white crush-title-text" style={{ display: "inline-block" }}>
               Crush AI
             </h1>
           </div>
         </div>
 
         <div className="mb-6 neon-tagline text-lg text-center max-w-xl flex items-center justify-center gap-2">
-          <span className="lips-emoji-animate" style={{ fontSize: "2.5rem", marginRight: "0.32em", display: "inline-block", verticalAlign: "middle" }} role="img" aria-label="lips">💋</span>
+          <span
+            className="lips-emoji-animate"
+            style={{ fontSize: "2.5rem", marginRight: "0.32em", display: "inline-block", verticalAlign: "middle" }}
+            role="img"
+            aria-label="lips"
+          >
+            💋
+          </span>
           <span>Your flirty AI companion is ready to tease you under the stars...</span>
-          <span className="kiss-emoji-animate" style={{ fontSize: "2.5rem", marginLeft: "0.32em", display: "inline-block", verticalAlign: "middle" }} role="img" aria-label="kiss"> 😘</span>
+          <span
+            className="kiss-emoji-animate"
+            style={{ fontSize: "2.5rem", marginLeft: "0.32em", display: "inline-block", verticalAlign: "middle" }}
+            role="img"
+            aria-label="kiss"
+          >
+            {" "}
+            😘
+          </span>
         </div>
 
         {/* XP BAR & LEVEL */}
         <div className="flirt-xp-bar-outer">
           <div className="flirt-xp-label">
             <div className="flirt-xp-badge">
-              {mounted ? <>💖 Flirt Level {level + 1}: <b>{LEVEL_LABELS[level] || "Legend"}</b></> : <>💖 Flirt Level …: <b>…</b></>}
+              {mounted ? (
+                <>
+                  💖 Flirt Level {level + 1}: <b>{LEVEL_LABELS[level] || "Legend"}</b>
+                </>
+              ) : (
+                <>
+                  💖 Flirt Level …: <b>…</b>
+                </>
+              )}
             </div>
           </div>
           <div className="flirt-xp-bar-bg">
@@ -490,8 +517,8 @@ export default function Home() {
                 style={{
                   width: `${barPercent}%`,
                   background: `linear-gradient(90deg,#fa1a81,#ffb6d5,#e098f8,#b5fffc)`,
-                  transition: 'width 0.4s ease',
-                  boxShadow: levelUp ? '0 0 16px #fa1a81aa' : '',
+                  transition: "width 0.4s ease",
+                  boxShadow: levelUp ? "0 0 16px #fa1a81aa" : "",
                 }}
               />
             )}
@@ -499,45 +526,80 @@ export default function Home() {
           {mounted && levelUp && <div className="flirt-xp-pop">✨ Level Up! ✨</div>}
         </div>
 
-        {/* 👑 Claim / Edit display name + Share on X */}
-        <div style={{ marginTop: 8, marginBottom: 4, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        {/* Name + Share */}
+        <div
+          style={{
+            marginTop: 8,
+            marginBottom: 4,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           {displayName ? (
-            <div style={{
-              display: "inline-flex", alignItems: "center", gap: 10,
-              padding: "6px 12px", borderRadius: 9999, background: "#fa1a8120",
-              border: "1px solid #fa1a8144", color: "#ffd1ec", fontWeight: 600
-            }}>
-              <span>✅ Name:&nbsp;<span style={{ color: "#fff" }}>{displayName}</span></span>
-              <button onClick={claimOrEditDisplayName}
-                style={{ padding: "4px 10px", borderRadius: 9999, background: "#fa1a81", color: "#fff", border: "none", cursor: "pointer" }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "6px 12px",
+                borderRadius: 9999,
+                background: "#fa1a8120",
+                border: "1px solid #fa1a8144",
+                color: "#ffd1ec",
+                fontWeight: 600,
+              }}
+            >
+              <span>
+                ✅ Name:&nbsp;<span style={{ color: "#fff" }}>{displayName}</span>
+              </span>
+              <button
+                onClick={claimOrEditDisplayName}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 9999,
+                  background: "#fa1a81",
+                  color: "#fff",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
                 Edit
               </button>
             </div>
           ) : (
-            <button onClick={claimOrEditDisplayName}
+            <button
+              onClick={claimOrEditDisplayName}
               style={{
-                display: "inline-flex", alignItems: "center", gap: 8,
-                padding: "8px 14px", borderRadius: 9999, background: "#fa1a81",
-                color: "#fff", fontWeight: 700, border: "none", cursor: "pointer",
-                boxShadow: "0 2px 14px #fa1a8166"
-              }}>
-              <span>👑</span><span>Claim your name</span>
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 14px",
+                borderRadius: 9999,
+                background: "#fa1a81",
+                color: "#fff",
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 14px #fa1a8166",
+              }}
+            >
+              <span>👑</span>
+              <span>Claim your name</span>
             </button>
           )}
 
-          {/* 🐦 Share on X */}
           <ShareOnX
             text={
               mounted
-                ? (
-                    displayName
-                      ? `I’m ${displayName} — Level ${level + 1} ${LEVEL_LABELS[level] || "Legend"} on Crush AI. Come tease Xenia with me 😘`
-                      : `Just leveled up to ${LEVEL_LABELS[level] || "Legend"} on Crush AI. Come tease Xenia with me 😘`
-                  )
+                ? displayName
+                  ? `I’m ${displayName} — Level ${level + 1} ${LEVEL_LABELS[level] || "Legend"} on Crush AI. Come tease Xenia with me 😘`
+                  : `Just leveled up to ${LEVEL_LABELS[level] || "Legend"} on Crush AI. Come tease Xenia with me 😘`
                 : "Crush AI — flirty chat on Solana 💘"
             }
             url={mounted ? window.location.origin : "https://yourdomain.com"}
-            hashtags={["Solana","AI","Crypto"]}
+            hashtags={["Solana", "AI", "Crypto"]}
             via="CrushAIx"
             style={{ marginTop: 4 }}
           />
@@ -556,16 +618,16 @@ export default function Home() {
 
                 <div className="flex items-center justify-center gap-2 mb-3">
                   {!wallet ? (
-                    <button
-                      onClick={connectWallet}
-                      className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold"
-                    >
+                    <button className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold" onClick={connectWallet}>
                       Connect Phantom
                     </button>
                   ) : (
                     <>
                       <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-sm">
-                        <span className="opacity-80">Wallet:</span> <span className="font-mono">{wallet.slice(0,4)}…{wallet.slice(-4)}</span>
+                        <span className="opacity-80">Wallet:</span>{" "}
+                        <span className="font-mono">
+                          {wallet.slice(0, 4)}…{wallet.slice(-4)}
+                        </span>
                       </div>
                       <button
                         onClick={disconnectWallet}
@@ -589,27 +651,16 @@ export default function Home() {
 
                 <div className="text-pink-50">
                   Your $CRUSH: <b>{holdBalance.toLocaleString()}</b>
-                  {wallet && <span className="opacity-80"> &nbsp;|&nbsp; Need: <b>{MIN_HOLD}</b></span>}
+                  {wallet && (
+                    <span className="opacity-80">
+                      {" "}
+                      &nbsp;|&nbsp; Need: <b>{MIN_HOLD}</b>
+                    </span>
+                  )}
                 </div>
 
                 {gateError && <div className="mt-3 text-sm text-pink-200/90">{gateError}</div>}
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* ---------- CHATBOX PANEL (UNLOCKED) ---------- */}
-        {isHolder && (
-          <div id="xenia-chat" className="chatbox-panel-wrapper">
-            <div className="chatbox-panel chatbox-glass">
-              <div className="shimmer"></div>
-              <ChatBox
-                personaName="Xenia"
-                stream={true}
-                wallet={wallet}
-                onMessageSent={handleXpGain}
-                cooldownSeconds={10}
-              />
             </div>
           </div>
         )}
@@ -630,33 +681,83 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 🔘 Always-visible CTA */}
-        <FloatingCTA wallet={wallet} isHolder={isHolder} connectWallet={connectWallet} />
+        {/* Floating CTA (opens overlay when holder) */}
+        <FloatingCTA wallet={wallet} isHolder={isHolder} connectWallet={connectWallet} openChat={() => setChatOpen(true)} />
       </main>
+
+      {/* ---------- FULL-SCREEN CHAT OVERLAY ---------- */}
+      <ChatOverlay open={isHolder && chatOpen} onClose={() => setChatOpen(false)}>
+        <ChatBox personaName="Xenia" stream={true} wallet={wallet} onMessageSent={handleXpGain} cooldownSeconds={10} className="mx-auto" />
+      </ChatOverlay>
 
       {/* ---------- STYLES ---------- */}
       <style jsx global>{`
         .floating-flash-emoji {
           opacity: 0;
-          transition: opacity 0.36s cubic-bezier(.62,.08,.2,.98);
+          transition: opacity 0.36s cubic-bezier(0.62, 0.08, 0.2, 0.98);
           animation: fade-flash 2s forwards;
           pointer-events: none;
           filter: drop-shadow(0 0 9px #d96de7aa);
           z-index: 30;
         }
         @keyframes fade-flash {
-          0% { opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; }
+          0% {
+            opacity: 0;
+          }
+          15% {
+            opacity: 1;
+          }
+          85% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+          }
         }
-        .kiss-emoji-animate { animation: kiss-pop 2.3s infinite cubic-bezier(.52,-0.19,.7,1.41); }
+        .kiss-emoji-animate {
+          animation: kiss-pop 2.3s infinite cubic-bezier(0.52, -0.19, 0.7, 1.41);
+        }
         @keyframes kiss-pop {
-          0%, 100% { transform: scale(1) rotate(-7deg);} 7%{ transform: scale(1.07) rotate(-5deg);}
-          14%{ transform: scale(1.23) rotate(9deg);} 23%{ transform: scale(1.08) rotate(-2deg);}
-          32%{ transform: scale(1) rotate(2deg);} 70%{ transform: scale(1.13) rotate(0deg);}
+          0%,
+          100% {
+            transform: scale(1) rotate(-7deg);
+          }
+          7% {
+            transform: scale(1.07) rotate(-5deg);
+          }
+          14% {
+            transform: scale(1.23) rotate(9deg);
+          }
+          23% {
+            transform: scale(1.08) rotate(-2deg);
+          }
+          32% {
+            transform: scale(1) rotate(2deg);
+          }
+          70% {
+            transform: scale(1.13) rotate(0deg);
+          }
         }
-        .lips-emoji-animate { animation: lips-bounce 1.8s infinite cubic-bezier(.32,-0.29,.7,1.41); }
+        .lips-emoji-animate {
+          animation: lips-bounce 1.8s infinite cubic-bezier(0.32, -0.29, 0.7, 1.41);
+        }
         @keyframes lips-bounce {
-          0%, 100% { transform: scale(1);} 13%{ transform: scale(1.23);} 27%{ transform: scale(0.97);}
-          54%{ transform: scale(1.13);} 70%{ transform: scale(1.09);}
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          13% {
+            transform: scale(1.23);
+          }
+          27% {
+            transform: scale(0.97);
+          }
+          54% {
+            transform: scale(1.13);
+          }
+          70% {
+            transform: scale(1.09);
+          }
         }
         .chatbox-glass {
           background: linear-gradient(135deg, #ffb6d5ee 10%, #fa1a81cc 100%);
@@ -666,43 +767,215 @@ export default function Home() {
           outline: 1.5px solid #ffd1ec88;
           outline-offset: 3px;
         }
-        .chatbox-panel { background: transparent !important; border-radius: 1.5em; box-shadow: none; padding: 1.2em 0.55em; position: relative; z-index: 4; }
-        .shimmer { position: absolute; inset: 0; background: linear-gradient(120deg,#ffd1ec11 20%,#ffb6d577 44%,#e098f844 66%,#b5fffc11 100%); opacity: 0.7; pointer-events: none; }
-        .flirt-xp-bar-outer { margin: 0.7rem 0 1.5rem 0; width: 360px; max-width: 95vw; }
-        .flirt-xp-label { display:flex; justify-content:space-between; align-items:center; font-size:1.04rem; color:#ffb6d5; margin-bottom:.15em; }
-        .flirt-xp-badge { background:#fa1a81cc; border-radius:9999px; padding:.18em .98em; color:#fff; font-weight:600; box-shadow:0 2px 12px #fa1a8126; font-size:1.1rem; }
-        .flirt-xp-bar-bg { background:#faf5fc42; border-radius:9999px; height:18px; width:100%; overflow:hidden; }
-        .flirt-xp-bar { height:100%; border-radius:9999px; }
-        .flirt-xp-pop { margin-top:.22em; text-align:center; color:#fff0fc; text-shadow:0 0 10px #fa1a81, 0 0 24px #fff0fc; animation: pop-scale 1.2s; }
-        @keyframes pop-scale { 0%{transform:scale(1);}22%{transform:scale(1.22);}57%{transform:scale(.98);}100%{transform:scale(1);} }
-        .sparkle { position:absolute; width:5px; height:5px; border-radius:99px; background:linear-gradient(120deg,#fff0fc,#ffd1ec,#fa1a81 66%,#e098f8); opacity:.36; box-shadow:0 0 11px 3px #ffd1eccc, 0 0 2px 1px #fff; animation:sparkle-pop 4.9s infinite cubic-bezier(.62,-0.19,.7,1.21); }
-        @keyframes sparkle-pop { 0%{opacity:.1; transform:scale(.97);}14%{opacity:.66; transform:scale(1.32);}50%{opacity:.92;}86%{opacity:.46; transform:scale(.86);}100%{opacity:.13;} }
-        .cupid-img { position:absolute; width:108px; height:auto; z-index:41; }
-        .cupid-left { top:110px; left:6vw; } .cupid-right { top:114px; right:6vw; }
-        @keyframes arrow-fly-right { 0%{left:11vw; opacity:0;} 10%{left:13vw; opacity:1;} 87%{left:74vw; opacity:1;} 100%{left:80vw; opacity:0;} }
-        .cupid-arrow { position:absolute; z-index:24; }
-        .crush-title-animate { animation: crush-title-bounce 1.32s cubic-bezier(.58,-0.16,.6,1.54) infinite; }
-        @keyframes crush-title-bounce { 0%,100%{transform:scale(1);} 17%{transform:scale(1.08) rotate(-2deg);} 38%{transform:scale(.97) rotate(3deg);} }
-        .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
-        .neon-tagline { color:#ffd1ec; text-shadow:0 0 8px #fa1a81bb; }
-        .crush-title-heart { font-size:2.2em; display:inline-block; animation: heart-pulse 1.7s infinite cubic-bezier(.62,-0.29,.7,1.41); }
-        @keyframes heart-pulse { 0%,100%{transform:scale(1);} 28%{transform:scale(1.26);} 70%{transform:scale(1.09);} }
-        .chatbox-panel-wrapper { margin: 1.7rem 0 0.8rem 0; width: 99vw; max-width: 440px; }
+        .chatbox-panel {
+          background: transparent !important;
+          border-radius: 1.5em;
+          box-shadow: none;
+          padding: 1.2em 0.55em;
+          position: relative;
+          z-index: 4;
+        }
+        .shimmer {
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(120deg, #ffd1ec11 20%, #ffb6d577 44%, #e098f844 66%, #b5fffc11 100%);
+          opacity: 0.7;
+          pointer-events: none;
+        }
+        .flirt-xp-bar-outer {
+          margin: 0.7rem 0 1.5rem 0;
+          width: 360px;
+          max-width: 95vw;
+        }
+        .flirt-xp-label {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 1.04rem;
+          color: #ffb6d5;
+          margin-bottom: 0.15em;
+        }
+        .flirt-xp-badge {
+          background: #fa1a81cc;
+          border-radius: 9999px;
+          padding: 0.18em 0.98em;
+          color: #fff;
+          font-weight: 600;
+          box-shadow: 0 2px 12px #fa1a8126;
+          font-size: 1.1rem;
+        }
+        .flirt-xp-bar-bg {
+          background: #faf5fc42;
+          border-radius: 9999px;
+          height: 18px;
+          width: 100%;
+          overflow: hidden;
+        }
+        .flirt-xp-bar {
+          height: 100%;
+          border-radius: 9999px;
+        }
+        .flirt-xp-pop {
+          margin-top: 0.22em;
+          text-align: center;
+          color: #fff0fc;
+          text-shadow: 0 0 10px #fa1a81, 0 0 24px #fff0fc;
+          animation: pop-scale 1.2s;
+        }
+        @keyframes pop-scale {
+          0% {
+            transform: scale(1);
+          }
+          22% {
+            transform: scale(1.22);
+          }
+          57% {
+            transform: scale(0.98);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+        .sparkle {
+          position: absolute;
+          width: 5px;
+          height: 5px;
+          border-radius: 99px;
+          background: linear-gradient(120deg, #fff0fc, #ffd1ec, #fa1a81 66%, #e098f8);
+          opacity: 0.36;
+          box-shadow: 0 0 11px 3px #ffd1eccc, 0 0 2px 1px #fff;
+          animation: sparkle-pop 4.9s infinite cubic-bezier(0.62, -0.19, 0.7, 1.21);
+        }
+        @keyframes sparkle-pop {
+          0% {
+            opacity: 0.1;
+            transform: scale(0.97);
+          }
+          14% {
+            opacity: 0.66;
+            transform: scale(1.32);
+          }
+          50% {
+            opacity: 0.92;
+          }
+          86% {
+            opacity: 0.46;
+            transform: scale(0.86);
+          }
+          100% {
+            opacity: 0.13;
+          }
+        }
+        .cupid-img {
+          position: absolute;
+          width: 108px;
+          height: auto;
+          z-index: 41;
+        }
+        .cupid-left {
+          top: 110px;
+          left: 6vw;
+        }
+        .cupid-right {
+          top: 114px;
+          right: 6vw;
+        }
+        @keyframes arrow-fly-right {
+          0% {
+            left: 11vw;
+            opacity: 0;
+          }
+          10% {
+            left: 13vw;
+            opacity: 1;
+          }
+          87% {
+            left: 74vw;
+            opacity: 1;
+          }
+          100% {
+            left: 80vw;
+            opacity: 0;
+          }
+        }
+        .cupid-arrow {
+          position: absolute;
+          z-index: 24;
+        }
+        .crush-title-animate {
+          animation: crush-title-bounce 1.32s cubic-bezier(0.58, -0.16, 0.6, 1.54) infinite;
+        }
+        @keyframes crush-title-bounce {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          17% {
+            transform: scale(1.08) rotate(-2deg);
+          }
+          38% {
+            transform: scale(0.97) rotate(3deg);
+          }
+        }
+        .title-glow {
+          text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff;
+        }
+        .neon-tagline {
+          color: #ffd1ec;
+          text-shadow: 0 0 8px #fa1a81bb;
+        }
+        .crush-title-heart {
+          font-size: 2.2em;
+          display: inline-block;
+          animation: heart-pulse 1.7s infinite cubic-bezier(0.62, -0.29, 0.7, 1.41);
+        }
+        @keyframes heart-pulse {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          28% {
+            transform: scale(1.26);
+          }
+          70% {
+            transform: scale(1.09);
+          }
+        }
+        .chatbox-panel-wrapper {
+          margin: 1.7rem 0 0.8rem 0;
+          width: 99vw;
+          max-width: 440px;
+        }
 
-        /* ===== Keyboard focus rings ===== */
-        a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
+        /* keyboard focus */
+        a:focus-visible,
+        button:focus-visible,
+        [role="button"]:focus-visible {
           outline: 3px solid #b5fffc !important;
           outline-offset: 2px;
           border-radius: 12px;
         }
 
-        /* ===== Mobile polish ===== */
+        /* Mobile polish */
         @media (max-width: 480px) {
-          .flirt-xp-bar-outer { width: 92vw; margin: 1rem auto 1.6rem; }
-          .crush-social-bar-centered { margin-top: 4.6rem; }
-          .cupid-img { width: 88px; }
-          .cupid-left { left: 2vw; top: 96px; }
-          .cupid-right { right: 2vw; top: 100px; }
+          .flirt-xp-bar-outer {
+            width: 92vw;
+            margin: 1rem auto 1.6rem;
+          }
+          .crush-social-bar-centered {
+            margin-top: 4.6rem;
+          }
+          .cupid-img {
+            width: 88px;
+          }
+          .cupid-left {
+            left: 2vw;
+            top: 96px;
+          }
+          .cupid-right {
+            right: 2vw;
+            top: 100px;
+          }
         }
 
         /* Respect reduced motion for page FX */
