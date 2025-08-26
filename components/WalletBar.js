@@ -1,9 +1,10 @@
-// components/WalletBar.js
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { tierFor, formatUI } from "../utils/solanaTokens";
 import { useTokenBalance } from "../utils/useTokenBalance";
+import MobileDeepLinkButton from "./MobileDeepLinkButton";
+import { isMobileUA, hasInjectedWallet, goToWalletApp } from "../utils/mobileWallet";
 
 const CRUSH_MINT = process.env.NEXT_PUBLIC_CRUSH_MINT;
 
@@ -51,7 +52,15 @@ export default function WalletBar() {
     };
   }, []);
 
-  const openModal = () => setVisible?.(true);
+  const openModal = useCallback(() => {
+    const mobile = isMobileUA();
+    const injected = hasInjectedWallet();
+    if (mobile && !injected) {
+      goToWalletApp("phantom");
+      return;
+    }
+    setVisible?.(true);
+  }, [setVisible]);
 
   function tierClass(t) {
     switch (t) {
@@ -72,13 +81,14 @@ export default function WalletBar() {
     <>
       <div className="wallet-under-row" ref={menuRef}>
         {!connected ? (
-          <button
-            type="button"
+          // Force into wallet app on mobile; otherwise open modal
+          <MobileDeepLinkButton
+            prefer="phantom"
             className="flirty-nav-tile wallet-tile wallet-tile--big"
-            onClick={openModal}
+            onNormalClick={openModal}
           >
             💖 Connect Wallet
-          </button>
+          </MobileDeepLinkButton>
         ) : (
           <div className="wallet-cluster">
             <button
@@ -89,8 +99,7 @@ export default function WalletBar() {
               aria-haspopup="menu"
               title={loading ? "Refreshing..." : "Wallet menu"}
             >
-              ✅ {short} — {tier} ({formatUI(balance)}) {loading ? "⏳" : ""}
-              <span aria-hidden>▾</span>
+              ✅ {short} — {tier} ({formatUI(balance)}) {loading ? "⏳" : ""} <span aria-hidden>▾</span>
             </button>
 
             {open && (
@@ -100,7 +109,7 @@ export default function WalletBar() {
                   className="wallet-menu-item"
                   onClick={() => {
                     setOpen(false);
-                    openModal();
+                    openModal(); // respects mobile deep link
                   }}
                   role="menuitem"
                 >
@@ -111,7 +120,7 @@ export default function WalletBar() {
                   className="wallet-menu-item"
                   onClick={() => {
                     setOpen(false);
-                    refresh(true); // force refresh, bypass cache
+                    refresh(true);
                   }}
                   role="menuitem"
                 >
@@ -145,12 +154,9 @@ export default function WalletBar() {
           padding: 10px 12px 2px;
           gap: 10px;
           position: relative;
-          z-index: 9000; /* above social bar */
+          z-index: 9000;
         }
-        .wallet-cluster {
-          position: relative;
-          z-index: 9500; /* ensure dropdown trigger is on top */
-        }
+        .wallet-cluster { position: relative; z-index: 9500; }
       `}</style>
 
       <style jsx global>{`
@@ -164,27 +170,15 @@ export default function WalletBar() {
           transition: transform 0.15s ease, filter 0.15s ease;
           white-space: nowrap;
           position: relative;
-          z-index: 9600; /* wallet button above ornaments */
+          z-index: 9600;
         }
-        .wallet-tile--big {
-          font-size: 18px;
-          font-weight: 800;
-          padding: 14px 26px;
-          min-height: 52px;
-        }
-        .wallet-tile--connected {
-          font-size: 14.5px;
-          padding: 10px 18px;
-          min-height: 40px;
-        }
-        .wallet-tile:hover {
-          filter: brightness(1.05);
-          transform: translateY(-1px);
-        }
+        .wallet-tile--big { font-size: 18px; font-weight: 800; padding: 14px 26px; min-height: 52px; }
+        .wallet-tile--connected { font-size: 14.5px; padding: 10px 18px; min-height: 40px; }
+        .wallet-tile:hover { filter: brightness(1.05); transform: translateY(-1px); }
 
         .wallet-menu {
           position: absolute;
-          top: calc(100% + 12px); /* more breathing room below button */
+          top: calc(100% + 12px);
           left: 50%;
           transform: translateX(-50%);
           min-width: 210px;
@@ -193,66 +187,26 @@ export default function WalletBar() {
           border: 1px solid rgba(255, 255, 255, 0.22);
           border-radius: 14px;
           padding: 8px;
-          z-index: 9999; /* above everything */
+          z-index: 9999;
           animation: fadeInScale 0.15s ease-out;
-          /* base shadow; tier class adds glow */
           box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
         }
 
-        /* 💎 Tier-specific glow colors (strong + wide for visibility) */
-        .wallet-menu.tier-god {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35),
-            0 0 25px 8px rgba(0, 255, 255, 0.75);
-        }
-        .wallet-menu.tier-elite {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35),
-            0 0 25px 8px rgba(255, 140, 0, 0.75);
-        }
-        .wallet-menu.tier-crushed {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35),
-            0 0 25px 8px rgba(255, 105, 180, 0.75);
-        }
-        .wallet-menu.tier-supporter {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35),
-            0 0 25px 8px rgba(144, 238, 144, 0.75);
-        }
-        .wallet-menu.tier-newbie {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35),
-            0 0 25px 8px rgba(169, 169, 169, 0.75);
-        }
+        .wallet-menu.tier-god { box-shadow: 0 14px 36px rgba(0,0,0,0.35), 0 0 25px 8px rgba(0,255,255,0.75); }
+        .wallet-menu.tier-elite { box-shadow: 0 14px 36px rgba(0,0,0,0.35), 0 0 25px 8px rgba(255,140,0,0.75); }
+        .wallet-menu.tier-crushed { box-shadow: 0 14px 36px rgba(0,0,0,0.35), 0 0 25px 8px rgba(255,105,180,0.75); }
+        .wallet-menu.tier-supporter { box-shadow: 0 14px 36px rgba(0,0,0,0.35), 0 0 25px 8px rgba(144,238,144,0.75); }
+        .wallet-menu.tier-newbie { box-shadow: 0 14px 36px rgba(0,0,0,0.35), 0 0 25px 8px rgba(169,169,169,0.75); }
 
         .wallet-menu-item {
-          width: 100%;
-          text-align: left;
-          background: transparent;
-          border: 1px solid transparent;
-          color: #ffe9f6;
-          padding: 10px 12px;
-          border-radius: 10px;
-          font-weight: 700;
-          cursor: pointer;
+          width: 100%; text-align: left; background: transparent; border: 1px solid transparent;
+          color: #ffe9f6; padding: 10px 12px; border-radius: 10px; font-weight: 700; cursor: pointer;
         }
-        .wallet-menu-item:hover {
-          background: linear-gradient(90deg, #ff63b955, #a873ff55);
-          border-color: rgba(255, 255, 255, 0.18);
-        }
-        .wallet-danger {
-          color: #ffd1d1;
-        }
-        .wallet-danger:hover {
-          background: linear-gradient(90deg, #ff6b6b55, #ff9f9f55);
-        }
+        .wallet-menu-item:hover { background: linear-gradient(90deg,#ff63b955,#a873ff55); border-color: rgba(255,255,255,0.18); }
+        .wallet-danger { color: #ffd1d1; }
+        .wallet-danger:hover { background: linear-gradient(90deg,#ff6b6b55,#ff9f9f55); }
 
-        @keyframes fadeInScale {
-          from {
-            opacity: 0;
-            transform: translateX(-50%) scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(-50%) scale(1);
-          }
-        }
+        @keyframes fadeInScale { from { opacity:0; transform: translateX(-50%) scale(0.95);} to { opacity:1; transform: translateX(-50%) scale(1);} }
       `}</style>
     </>
   );

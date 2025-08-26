@@ -1,10 +1,11 @@
 // components/WalletGate.js
-import { useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useTokenBalance } from "../utils/useTokenBalance";
 import { tierFor } from "../utils/solanaTokens";
 import { ALPHA_BYPASS_WALLET } from "../utils/alpha";
+import MobileDeepLinkButton from "./MobileDeepLinkButton";
+import { isMobileUA, hasInjectedWallet } from "../utils/mobileWallet";
 
 /**
  * Props:
@@ -16,13 +17,12 @@ export default function WalletGate({
   requireTier = "😘 SUPPORTER",
   mint = process.env.NEXT_PUBLIC_CRUSH_MINT,
 }) {
-  const { connected, publicKey } = useWallet();
+  const { connected } = useWallet();
   const { setVisible } = useWalletModal();
 
-  // Client-side token balance (safe in alpha; uses RPC when available)
+  // Client-side token balance (alpha-ok)
   const { balance, loading } = useTokenBalance(mint);
 
-  // --- ALPHA MODE: auto-pass the gate ---
   if (typeof window !== "undefined" && ALPHA_BYPASS_WALLET) {
     return (
       <div className="w-full rounded-2xl p-4 bg-black/30 border border-pink-300/30 text-center">
@@ -32,18 +32,30 @@ export default function WalletGate({
     );
   }
 
-  // --- Non-alpha: simple gate logic ---
-  // Derive a rough tier from balance and compare. For now, any >0 balance passes "Supporter".
-  const userTier = tierFor(balance || 0); // falls back to lowest if unknown
+  const userTier = tierFor(balance || 0);
   const meetsRequirement = (() => {
     if (!requireTier) return true;
     if (!balance || balance <= 0) return false;
-    // If you want strict tier ordering, implement a rank() using your solanaTokens tiers.
-    // For alpha non-bypass we keep it simple: any positive balance satisfies "Supporter".
     return true;
   })();
 
   if (!connected) {
+    const mobile = isMobileUA();
+    const injected = hasInjectedWallet();
+
+    // On mobile with no provider → force open in wallet app
+    if (mobile && !injected) {
+      return (
+        <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
+          <div className="text-lg mb-3">🔒 Holders-only content</div>
+          <MobileDeepLinkButton prefer="phantom" className="px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition">
+            Open in Phantom
+          </MobileDeepLinkButton>
+        </div>
+      );
+    }
+
+    // Desktop / in-app browser → open modal
     return (
       <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
         <div className="text-lg mb-3">🔒 Holders-only content</div>
@@ -51,7 +63,7 @@ export default function WalletGate({
           onClick={() => setVisible(true)}
           className="px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition"
         >
-          Connect Phantom
+          Connect Wallet
         </button>
       </div>
     );
@@ -79,6 +91,5 @@ export default function WalletGate({
     );
   }
 
-  // Access granted
   return <>{children}</>;
 }
