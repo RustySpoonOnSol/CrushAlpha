@@ -1,13 +1,15 @@
 // components/ChatBox.js
-// - Uses server API for balance (/api/holdings/verify) — no browser RPC (fixes 403)
-// - Works with Phantom; signs a short message before chat
+// Read-only gating: NO per-message signatures.
+// - One-time (or trusted) wallet connect
+// - Balance via /api/tier?address=... (fallback to /api/holdings/verify)
+// - Works with Phantom on desktop/mobile
 // - Optional alpha bypass via NEXT_PUBLIC_ALPHA_MODE="1"
 
 import { useEffect, useRef, useState } from "react";
 
 const CRUSH_MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
-  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJsk"; // <- fixed (no trailing G)
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJsk";
 
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const ALPHA_MODE =
@@ -21,25 +23,25 @@ function nid(size = 12) {
   return id;
 }
 
+// Prefer /api/tier (Edge); fallback to /api/holdings/verify
 async function serverBalance(owner, mint) {
+  // Try /api/tier
+  try {
+    const r = await fetch(`/api/tier?address=${encodeURIComponent(owner)}`, {
+      headers: { "content-type": "application/json" },
+    });
+    if (r.ok) {
+      const j = await r.json();
+      return Number(j?.uiAmount || 0);
+    }
+  } catch {}
+  // Fallback to your existing verify endpoint
   const res = await fetch(
     `/api/holdings/verify?owner=${encodeURIComponent(owner)}&mint=${encodeURIComponent(mint)}`
   );
   if (!res.ok) throw new Error("verify failed");
   const j = await res.json();
   return Number(j?.amount || 0);
-}
-
-async function phantomSignOnce() {
-  if (!window?.solana?.isPhantom) throw new Error("Phantom not found");
-  if (typeof window.solana.signMessage !== "function") {
-    throw new Error("Phantom signMessage not available");
-  }
-  const ts = Date.now();
-  const msg = `CrushAI|chat|${ts}`;
-  const encoded = new TextEncoder().encode(msg);
-  const { signature } = await window.solana.signMessage(encoded, "utf8");
-  return { msg, sig: Array.from(signature) };
 }
 
 function TypingDots() {
@@ -61,6 +63,7 @@ function TypingDots() {
 }
 
 export default function ChatBox({
+  wallet: walletProp,            // <- if provided, use external wallet (from parent)
   personaName = "Xenia",
   initialGreeting = "Hey cutie 😘 I’m all yours — flirty chat unlocked. Tiered experiences coming soon… 🔥",
   placeholder = "Say something naughty…",
@@ -96,14 +99,17 @@ export default function ChatBox({
   const inputRef = useRef(null);
   const sendingRef = useRef(false);
 
-  // wallet gate
+  // wallet gate (internal unless walletProp is given)
   const [wallet, setWallet] = useState(null);
+  const effectiveWallet = walletProp || wallet;
   const [bal, setBal] = useState(0);
   const [checking, setChecking] = useState(false);
   const [gateMsg, setGateMsg] = useState("");
 
+  // initial mount: greeting, restore history, try auto-connect
   useEffect(() => {
     if (!mounted) return;
+
     // hydrate chat
     const hello = { id: nid(), role: "ai", text: initialGreeting, ts: Date.now() };
     if (enablePersistence) {
@@ -118,25 +124,27 @@ export default function ChatBox({
       setMessages([hello]);
     }
 
-    // try restore wallet
-    const stored = localStorage.getItem("crush_wallet");
-    if (stored) {
-      setWallet(stored);
-      refreshBalance(stored);
-    } else if (window?.solana?.isPhantom) {
-      window.solana
-        .connect({ onlyIfTrusted: true })
-        .then((r) => {
-          const pk = r?.publicKey?.toString();
-          if (pk) {
-            setWallet(pk);
-            try { localStorage.setItem("crush_wallet", pk); } catch {}
-            refreshBalance(pk);
-          }
-        })
-        .catch(() => {});
+    // If parent didn't pass a wallet, restore/auto-connect internally
+    if (!walletProp) {
+      const stored = localStorage.getItem("crush_wallet");
+      if (stored) {
+        setWallet(stored);
+        refreshBalance(stored);
+      } else if (window?.solana?.isPhantom) {
+        window.solana
+          .connect({ onlyIfTrusted: true })
+          .then((r) => {
+            const pk = r?.publicKey?.toString();
+            if (pk) {
+              setWallet(pk);
+              try { localStorage.setItem("crush_wallet", pk); } catch {}
+              refreshBalance(pk);
+            }
+          })
+          .catch(() => {});
+      }
     }
-  }, [mounted, enablePersistence, persistKey, initialGreeting]);
+  }, [mounted, enablePersistence, persistKey, initialGreeting, walletProp]);
 
   // persist chat
   useEffect(() => {
@@ -144,18 +152,27 @@ export default function ChatBox({
     try { localStorage.setItem(persistKey, JSON.stringify(messages)); } catch {}
   }, [messages, mounted, enablePersistence, persistKey]);
 
-  // scroll
+  // if parent wallet changes, refresh balance
+  useEffect(() => {
+    if (!mounted) return;
+    if (walletProp) {
+      refreshBalance(walletProp);
+    }
+  }, [mounted, walletProp]);
+
+  // scroll on updates
   useEffect(() => {
     const el = listRef.current; if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
 
-  const isHolder = !!wallet && bal >= MIN_HOLD;
+  const isHolder = !!effectiveWallet && bal >= MIN_HOLD;
   const gateOpen = ALPHA_MODE ? true : isHolder;
 
   async function connectWallet() {
     try {
       setGateMsg("");
+      if (walletProp) return; // parent controls wallet
       if (!window?.solana?.isPhantom) {
         setGateMsg("Phantom not found. Install the Phantom extension.");
         return;
@@ -173,11 +190,14 @@ export default function ChatBox({
 
   async function disconnectWallet() {
     try { await window?.solana?.disconnect?.(); } catch {}
-    setWallet(null); setBal(0);
-    try { localStorage.removeItem("crush_wallet"); } catch {}
+    if (!walletProp) {
+      setWallet(null);
+      try { localStorage.removeItem("crush_wallet"); } catch {}
+    }
+    setBal(0);
   }
 
-  async function refreshBalance(pk = wallet) {
+  async function refreshBalance(pk = effectiveWallet) {
     if (!pk) return;
     setChecking(true);
     setGateMsg("");
@@ -199,13 +219,12 @@ export default function ChatBox({
     }
   };
 
+  // ---- Chat senders (NO signatures) ----
   async function sendJSON(text) {
-    if (!wallet) throw new Error("Wallet required");
-    const auth = await phantomSignOnce();
     const res = await fetch("/api/chat?stream=false", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, persona: personaName, wallet, auth }),
+      body: JSON.stringify({ message: text, persona: personaName, wallet: effectiveWallet }),
     });
     if (!res.ok) throw new Error("Network error");
     const data = await res.json();
@@ -213,11 +232,9 @@ export default function ChatBox({
   }
 
   async function sendStream(text, onToken) {
-    if (!wallet) throw new Error("Wallet required");
-    const auth = await phantomSignOnce();
     const res = await fetch("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ message: text, persona: personaName, wallet, auth }),
+      body: JSON.stringify({ message: text, persona: personaName, wallet: effectiveWallet }),
     });
     if (!res.body) throw new Error("No stream");
     const reader = res.body.getReader();
@@ -248,10 +265,10 @@ export default function ChatBox({
     const text = input.trim();
     if (!text || loading || sendingRef.current) return;
 
-    // live balance gate
-    if (!wallet) { setErr("🔌 Connect Phantom to chat."); return; }
+    // live balance gate (read-only)
+    if (!effectiveWallet) { setErr("🔌 Connect Phantom to chat."); return; }
     try {
-      const live = await serverBalance(wallet, CRUSH_MINT);
+      const live = await serverBalance(effectiveWallet, CRUSH_MINT);
       setBal(live);
       if (!ALPHA_MODE && live < MIN_HOLD) {
         setErr(`🔒 Hold at least ${MIN_HOLD} $CRUSH to chat.`);
@@ -285,9 +302,7 @@ export default function ChatBox({
         setMessages((p) => p.map((m) => (m.id === aiId ? { ...m, text: reply } : m)));
       }
     } catch (e) {
-      const msg = e?.message?.includes("signMessage")
-        ? "Phantom is missing signMessage — update the wallet app."
-        : "Oops, I slipped… try again in a sec 💕";
+      const msg = "Oops, I slipped… try again in a sec 💕";
       setErr(msg);
       setMessages((p) => p.map((m) => (m.id === aiId ? { ...m, text: msg } : m)));
     } finally {
@@ -330,7 +345,7 @@ export default function ChatBox({
             Hold at least <b>{MIN_HOLD}</b> $CRUSH to unlock Xenia.
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {!wallet ? (
+            {!effectiveWallet ? (
               <button
                 onClick={connectWallet}
                 className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold"
@@ -342,20 +357,22 @@ export default function ChatBox({
                 <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-xs">
                   <span className="opacity-80">Wallet:</span>{" "}
                   <span className="font-mono">
-                    {wallet.slice(0, 4)}…{wallet.slice(-4)}
+                    {effectiveWallet.slice(0, 4)}…{effectiveWallet.slice(-4)}
                   </span>
                 </div>
-                <button
-                  onClick={disconnectWallet}
-                  className="px-3 py-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-white text-xs border border-pink-300/40"
-                >
-                  Disconnect
-                </button>
+                {!walletProp && (
+                  <button
+                    onClick={disconnectWallet}
+                    className="px-3 py-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-white text-xs border border-pink-300/40"
+                  >
+                    Disconnect
+                  </button>
+                )}
               </>
             )}
             <button
               onClick={() => refreshBalance()}
-              disabled={!wallet || checking}
+              disabled={!effectiveWallet || checking}
               className="px-3 py-2 rounded-xl bg-pink-500 text-white text-xs font-semibold disabled:opacity-60"
             >
               {checking ? "Checking…" : "Refresh Balance"}
@@ -369,14 +386,18 @@ export default function ChatBox({
       )}
 
       {/* messages */}
-      <div ref={listRef} className="space-y-2 mb-3 max-h-[320px] overflow-y-auto pr-1 custom-scroll" aria-live="polite">
+      <div
+        ref={listRef}
+        className="space-y-2 mb-3 max-h-[320px] overflow-y-auto pr-1 custom-scroll"
+        aria-live="polite"
+      >
         {messages.map((m) =>
           m.role === "ai" ? (
-            <div key={m.id} className="flirty-animated-bubble">
+            <div key={m.id} className="flirty-animated-bubble whitespace-pre-wrap break-words">
               💖 {m.text || <TypingDots />}
             </div>
           ) : (
-            <div key={m.id} className="sexy-user-bubble">
+            <div key={m.id} className="sexy-user-bubble whitespace-pre-wrap break-words">
               {m.text} 💋
             </div>
           )
@@ -412,7 +433,9 @@ export default function ChatBox({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          placeholder={!gateOpen ? `Hold ${MIN_HOLD}+ $CRUSH to chat` : onCooldown() ? `Wait ${coolLeft}s…` : placeholder}
+          placeholder={
+            !gateOpen ? `Hold ${MIN_HOLD}+ $CRUSH to chat` : onCooldown() ? `Wait ${coolLeft}s…` : placeholder
+          }
           aria-label="Message"
           className="flex-grow p-3 rounded-l-xl flirty-input border-0 focus:outline-none focus:ring-0 resize-none leading-6"
           disabled={disableInput}
