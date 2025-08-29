@@ -1,11 +1,9 @@
 // pages/api/chat.js
-// Node runtime for Vercel, rate limit + wallet signature + on-chain hold gate
+// Node runtime for Vercel, rate limit + read-only on-chain hold gate (NO signatures)
 
 export const config = { runtime: "nodejs", api: { bodyParser: { sizeLimit: "1mb" } } };
 
-import nacl from "tweetnacl";
-import bs58 from "bs58";
-
+// ❌ Removed: tweetnacl / bs58 imports (no signatures)
 const DEFAULT_MODEL = "gpt-4o-mini";
 const MAX_INPUT_LEN = 4000;
 
@@ -47,8 +45,7 @@ export default async function handler(req, res) {
       persona = "Xenia",
       temperature = 0.9,
       model = DEFAULT_MODEL,
-      wallet = null,
-      auth = null,
+      wallet = null, // read-only: used for balance lookup, not as auth
     } = data || {};
 
     if (!message || typeof message !== "string")
@@ -56,23 +53,9 @@ export default async function handler(req, res) {
     if (message.length > MAX_INPUT_LEN)
       return res.status(413).json({ error: "Message too long" });
 
-    // basic auth by wallet signature
+    // ❗ Read-only requirement: a wallet address must be provided for gating
     if (!wallet || typeof wallet !== "string" || wallet.length < 25)
       return res.status(401).json({ error: "Wallet required" });
-    if (!auth || !auth.msg || !Array.isArray(auth.sig))
-      return res.status(401).json({ error: "Signature required" });
-
-    try {
-      const msgBytes = new TextEncoder().encode(auth.msg);
-      const sigBytes = new Uint8Array(auth.sig);
-      const pubKey = bs58.decode(wallet);
-      const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubKey);
-      if (!ok) return res.status(401).json({ error: "Invalid signature" });
-      const ts = Number(String(auth.msg).split("|")[2] || "0");
-      if (!ts || Date.now() - ts > 60_000) return res.status(401).json({ error: "Expired signature" });
-    } catch {
-      return res.status(401).json({ error: "Bad signature" });
-    }
 
     const now = Date.now();
     const last = lastSendMap.get(wallet) || 0;
@@ -81,7 +64,7 @@ export default async function handler(req, res) {
       return res.status(429).json({ error: `Cooldown active. Wait ${left}s.` });
     }
 
-    // on-chain hold gate
+    // On-chain hold gate (no signature)
     const hold = await getCrushBalance(wallet, MINT).catch(() => -1);
     if (hold < MIN_HOLD) {
       return res.status(403).json({ error: `Hold at least ${MIN_HOLD} $CRUSH to chat`, hold });

@@ -1,92 +1,100 @@
 // components/WalletGate.js
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { useTokenBalance } from "../utils/useTokenBalance";
-import { tierFor } from "../utils/solanaTokens";
-import { ALPHA_BYPASS_WALLET } from "../utils/alpha";
-import MobileDeepLinkButton from "./MobileDeepLinkButton";
-import { isMobileUA, hasInjectedWallet } from "../utils/mobileWallet";
+// Read-only balance gate. No signatures, no wallet-adapter required.
+import { useEffect, useState } from "react";
 
-/**
- * Props:
- * - requireTier: minimum tier string required (e.g. "😘 SUPPORTER")
- * - mint: token mint address (defaults to NEXT_PUBLIC_CRUSH_MINT)
- */
-export default function WalletGate({
-  children,
-  requireTier = "😘 SUPPORTER",
-  mint = process.env.NEXT_PUBLIC_CRUSH_MINT,
-}) {
-  const { connected } = useWallet();
-  const { setVisible } = useWalletModal();
+const MINT = process.env.NEXT_PUBLIC_CRUSH_MINT || "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
+const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 
-  // Client-side token balance (alpha-ok)
-  const { balance, loading } = useTokenBalance(mint);
+async function fetchTier(address) {
+  try {
+    const r = await fetch(`/api/tier?address=${encodeURIComponent(address)}`);
+    if (r.ok) {
+      const j = await r.json();
+      return Number(j?.uiAmount || 0);
+    }
+  } catch {}
+  const r2 = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(address)}&mint=${encodeURIComponent(MINT)}`);
+  const j2 = await r2.json().catch(() => ({}));
+  return Number(j2?.amount || 0);
+}
 
-  if (typeof window !== "undefined" && ALPHA_BYPASS_WALLET) {
+export default function WalletGate({ children }) {
+  const [addr, setAddr] = useState(null);
+  const [amount, setAmount] = useState(0);
+  const [checking, setChecking] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? localStorage.getItem("crush_wallet") : null;
+    if (stored) {
+      setAddr(stored);
+      refresh(stored);
+    } else if (typeof window !== "undefined" && window.solana?.isPhantom) {
+      window.solana.connect({ onlyIfTrusted: true }).then(r => {
+        const pk = r?.publicKey?.toString();
+        if (pk) {
+          setAddr(pk);
+          try { localStorage.setItem("crush_wallet", pk); } catch {}
+          refresh(pk);
+        }
+      }).catch(()=>{});
+    }
+  }, []);
+
+  async function connect() {
+    try {
+      setErr("");
+      if (!window?.solana?.isPhantom) throw new Error("Install Phantom");
+      const { publicKey } = await window.solana.connect();
+      const pk = publicKey?.toString();
+      if (!pk) throw new Error("No public key");
+      setAddr(pk);
+      try { localStorage.setItem("crush_wallet", pk); } catch {}
+      await refresh(pk);
+    } catch (e) { setErr(e.message || "Connect failed"); }
+  }
+
+  async function disconnect() {
+    try { await window?.solana?.disconnect?.(); } catch {}
+    setAddr(null); setAmount(0); setErr("");
+    try { localStorage.removeItem("crush_wallet"); } catch {}
+  }
+
+  async function refresh(pk = addr) {
+    if (!pk) return;
+    setChecking(true); setErr("");
+    try {
+      const bal = await fetchTier(pk);
+      setAmount(bal);
+    } catch { setErr("Balance check failed"); }
+    finally { setChecking(false); }
+  }
+
+  const isHolder = !!addr && amount >= MIN_HOLD;
+
+  if (!isHolder) {
     return (
       <div className="w-full rounded-2xl p-4 bg-black/30 border border-pink-300/30 text-center">
-        <div className="text-xl text-pink-100 mb-2">✅ Alpha mode: access granted</div>
-        {children}
-      </div>
-    );
-  }
-
-  const userTier = tierFor(balance || 0);
-  const meetsRequirement = (() => {
-    if (!requireTier) return true;
-    if (!balance || balance <= 0) return false;
-    return true;
-  })();
-
-  if (!connected) {
-    const mobile = isMobileUA();
-    const injected = hasInjectedWallet();
-
-    // On mobile with no provider → force open in wallet app
-    if (mobile && !injected) {
-      return (
-        <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
-          <div className="text-lg mb-3">🔒 Holders-only content</div>
-          <MobileDeepLinkButton prefer="phantom" className="px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition">
-            Open in Phantom
-          </MobileDeepLinkButton>
+        <div className="text-xl font-semibold mb-1">🔒 Holders-only content</div>
+        <div className="mb-3">Hold at least <b>{MIN_HOLD}</b> $CRUSH to access this.</div>
+        <div className="flex items-center justify-center gap-2 mb-2">
+          {!addr ? (
+            <button onClick={connect} className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">Connect Phantom</button>
+          ) : (
+            <>
+              <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-sm">
+                <span className="opacity-80">Wallet:</span>{" "}
+                <span className="font-mono">{addr.slice(0,4)}…{addr.slice(-4)}</span>
+              </div>
+              <button onClick={disconnect} className="px-3 py-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-white text-sm border border-pink-300/40">Disconnect</button>
+            </>
+          )}
+          <button onClick={() => refresh()} disabled={!addr || checking} className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold disabled:opacity-60">
+            {checking ? "Checking…" : "Refresh"}
+          </button>
         </div>
-      );
-    }
-
-    // Desktop / in-app browser → open modal
-    return (
-      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
-        <div className="text-lg mb-3">🔒 Holders-only content</div>
-        <button
-          onClick={() => setVisible(true)}
-          className="px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition"
-        >
-          Connect Wallet
-        </button>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
-        <div className="animate-pulse text-pink-100">Checking your $CRUSH…</div>
-      </div>
-    );
-  }
-
-  if (!meetsRequirement) {
-    return (
-      <div className="w-full rounded-2xl p-6 bg-black/30 border border-pink-300/30 text-center">
-        <div className="text-lg mb-2">👀 Looks like you’re not a {requireTier} yet</div>
-        <a
-          href="/buy"
-          className="inline-block mt-1 px-5 py-2 rounded-xl bg-pink-500 text-white font-bold hover:opacity-90 transition"
-        >
-          Buy $CRUSH
-        </a>
+        <div className="text-sm">Your $CRUSH: <b>{amount.toLocaleString()}</b> • Need: <b>{MIN_HOLD}</b></div>
+        {err && <div className="mt-2 text-sm text-pink-200/90">{err}</div>}
       </div>
     );
   }
