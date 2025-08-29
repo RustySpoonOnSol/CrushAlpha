@@ -153,58 +153,6 @@ function FloatingCTA({ wallet, isHolder, connectWallet, openChat }) {
   );
 }
 
-/* ---------- Wallet Pill (top-right) ---------- */
-function WalletPill({ addr, tierName, amount, loading, err, onConnect, onRefresh, onDisconnect }) {
-  function short(a) {
-    return a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "";
-  }
-  return (
-    <div className="fixed right-4 top-4 z-50">
-      {!addr ? (
-        <button
-          onClick={onConnect}
-          className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-500/90"
-        >
-          Connect Wallet
-        </button>
-      ) : (
-        <div className="px-3 py-2 rounded-xl bg-white/10 text-white border border-white/15 backdrop-blur min-w-[200px]">
-          <div className="text-xs opacity-80">Wallet</div>
-          <div className="font-mono">{short(addr)}</div>
-          <div className="text-xs mt-1">
-            {loading ? (
-              "Checking tier…"
-            ) : err ? (
-              <span className="text-red-300">{err}</span>
-            ) : (
-              <>
-                {tierName ? `Tier: ` : null}
-                <b>{tierName || "FREE"}</b>
-                {typeof amount === "number" ? ` • ${amount.toLocaleString()} $CRUSH` : null}
-              </>
-            )}
-          </div>
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => onRefresh?.()}
-              disabled={loading}
-              className="px-2 py-1 rounded-lg bg-pink-500/30 hover:bg-pink-500/40 text-white text-xs"
-            >
-              {loading ? "…" : "Refresh"}
-            </button>
-            <button
-              onClick={() => onDisconnect?.()}
-              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs"
-            >
-              Disconnect
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -448,20 +396,6 @@ export default function Home() {
       <Head>
         <title>Crush AI 💘</title>
       </Head>
-
-      {/* Wallet Pill (top-right) */}
-      {mounted && (
-        <WalletPill
-          addr={wallet}
-          tierName={tierName}
-          amount={holdBalance}
-          loading={checking}
-          err={gateError}
-          onConnect={connectWallet}
-          onRefresh={refreshBalance}
-          onDisconnect={disconnectWallet}
-        />
-      )}
 
       {/* Floating Emoji Layer */}
       {mounted && (
@@ -975,7 +909,7 @@ export default function Home() {
             opacity: 0.92;
           }
           86% {
-            opacity: 0.46;
+            opacity: 0.46);
             transform: scale(0.86);
           }
           100% {
@@ -997,114 +931,52 @@ export default function Home() {
           right: 6vw;
         }
         @keyframes arrow-fly-right {
-          0% {
-            left: 11vw;
-            opacity: 0;
-          }
-          10% {
-            left: 13vw;
-            opacity: 1;
-          }
-          87% {
-            left: 74vw;
-            opacity: 1;
-          }
-          100% {
-            left: 80vw;
-            opacity: 0;
-          }
+          0% { left: 11vw; opacity: 0; }
+          10% { left: 13vw; opacity: 1; }
+          87% { left: 74vw; opacity: 1; }
+          100% { left: 80vw; opacity: 0; }
         }
-        .cupid-arrow {
-          position: absolute;
-          z-index: 24;
-        }
+        .cupid-arrow { position: absolute; z-index: 24; }
         .crush-title-animate {
           animation: crush-title-bounce 1.32s cubic-bezier(0.58, -0.16, 0.6, 1.54) infinite;
         }
         @keyframes crush-title-bounce {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          17% {
-            transform: scale(1.08) rotate(-2deg);
-          }
-          38% {
-            transform: scale(0.97) rotate(3deg);
-          }
+          0%,100% { transform: scale(1); }
+          17% { transform: scale(1.08) rotate(-2deg); }
+          38% { transform: scale(0.97) rotate(3deg); }
         }
-        .title-glow {
-          text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff;
-        }
-        .neon-tagline {
-          color: #ffd1ec;
-          text-shadow: 0 0 8px #fa1a81bb;
-        }
+        .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
+        .neon-tagline { color: #ffd1ec; text-shadow: 0 0 8px #fa1a81bb; }
         .crush-title-heart {
-          font-size: 2.2em;
-          display: inline-block;
+          font-size: 2.2em; display: inline-block;
           animation: heart-pulse 1.7s infinite cubic-bezier(0.62, -0.29, 0.7, 1.41);
         }
         @keyframes heart-pulse {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          28% {
-            transform: scale(1.26);
-          }
-          70% {
-            transform: scale(1.09);
-          }
+          0%,100% { transform: scale(1); }
+          28% { transform: scale(1.26); }
+          70% { transform: scale(1.09); }
         }
-        .chatbox-panel-wrapper {
-          margin: 1.7rem 0 0.8rem 0;
-          width: 99vw;
-          max-width: 440px;
-        }
+        .chatbox-panel-wrapper { margin: 1.7rem 0 0.8rem 0; width: 99vw; max-width: 440px; }
 
         /* keyboard focus */
-        a:focus-visible,
-        button:focus-visible,
-        [role="button"]:focus-visible {
-          outline: 3px solid #b5fffc !important;
-          outline-offset: 2px;
-          border-radius: 12px;
+        a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
+          outline: 3px solid #b5fffc !important; outline-offset: 2px; border-radius: 12px;
         }
 
         /* Mobile polish */
         @media (max-width: 480px) {
-          .flirt-xp-bar-outer {
-            width: 92vw;
-            margin: 1rem auto 1.6rem;
-          }
-          .crush-social-bar-centered {
-            margin-top: 4.6rem;
-          }
-          .cupid-img {
-            width: 88px;
-          }
-          .cupid-left {
-            left: 2vw;
-            top: 96px;
-          }
-          .cupid-right {
-            right: 2vw;
-            top: 100px;
-          }
+          .flirt-xp-bar-outer { width: 92vw; margin: 1rem auto 1.6rem; }
+          .crush-social-bar-centered { margin-top: 4.6rem; }
+          .cupid-img { width: 88px; }
+          .cupid-left { left: 2vw; top: 96px; }
+          .cupid-right { right: 2vw; top: 100px; }
         }
 
         /* Respect reduced motion for page FX */
         @media (prefers-reduced-motion: reduce) {
-          .floating-flash-emoji,
-          .kiss-emoji-animate,
-          .lips-emoji-animate,
-          .cupid-img,
-          .crush-title-animate,
-          .cupid-arrow,
-          .sparkle {
-            animation: none !important;
-            transition: none !important;
+          .floating-flash-emoji, .kiss-emoji-animate, .lips-emoji-animate,
+          .cupid-img, .crush-title-animate, .cupid-arrow, .sparkle {
+            animation: none !important; transition: none !important;
           }
         }
       `}</style>
