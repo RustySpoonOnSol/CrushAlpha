@@ -17,6 +17,8 @@ const CUPID_RIGHT_IMG = "/cupid_male.png";
 
 /* ---------- CONFIG ---------- */
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500"); // gate = 500 tokens
+const HAS_SUPABASE =
+  !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 /* ---------- helpers for client-only emoji bursts ---------- */
 function getSidePositions(side, count) {
@@ -73,13 +75,50 @@ const LEVEL_LABELS = [
 ];
 const XP_LEVELS = [0, 100, 400, 900, 1600, 2500, 3600];
 
-/* ---------- Server balance helper ---------- */
-async function getCrushBalance(owner) {
-  const r = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(owner)}`, {
-    headers: { "content-type": "application/json" },
-  });
-  const j = await r.json().catch(() => ({}));
-  return Number(j?.amount || 0);
+/* ---------- Tier fetcher (no signatures) ---------- */
+async function fetchTier(address) {
+  // try cached 60s
+  const cacheKey = `crush_tier_${address}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    if (cached && cached.expiresAt && Date.now() < cached.expiresAt) {
+      return cached; // { amount, tierName }
+    }
+  } catch {}
+
+  // 1) Preferred: /api/tier?address=...
+  try {
+    const r = await fetch(`/api/tier?address=${encodeURIComponent(address)}`, {
+      headers: { "content-type": "application/json" },
+    });
+    if (r.ok) {
+      const j = await r.json();
+      const amount = Number(j?.uiAmount || 0);
+      const tierName = j?.tier?.name || (amount >= MIN_HOLD ? "HOLDER" : "FREE");
+      const payload = { amount, tierName, expiresAt: Date.now() + 60_000 };
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(payload));
+      } catch {}
+      return payload;
+    }
+  } catch {}
+
+  // 2) Fallback: your existing verify endpoint
+  try {
+    const r = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(address)}`, {
+      headers: { "content-type": "application/json" },
+    });
+    const j = await r.json().catch(() => ({}));
+    const amount = Number(j?.amount || 0);
+    const tierName = amount >= MIN_HOLD ? "HOLDER" : "FREE";
+    const payload = { amount, tierName, expiresAt: Date.now() + 60_000 };
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(payload));
+    } catch {}
+    return payload;
+  } catch {
+    return { amount: 0, tierName: "FREE" };
+  }
 }
 
 /* ---------- Floating CTA (opens overlay if holder) ---------- */
@@ -114,6 +153,58 @@ function FloatingCTA({ wallet, isHolder, connectWallet, openChat }) {
   );
 }
 
+/* ---------- Wallet Pill (top-right) ---------- */
+function WalletPill({ addr, tierName, amount, loading, err, onConnect, onRefresh, onDisconnect }) {
+  function short(a) {
+    return a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "";
+  }
+  return (
+    <div className="fixed right-4 top-4 z-50">
+      {!addr ? (
+        <button
+          onClick={onConnect}
+          className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-500/90"
+        >
+          Connect Wallet
+        </button>
+      ) : (
+        <div className="px-3 py-2 rounded-xl bg-white/10 text-white border border-white/15 backdrop-blur min-w-[200px]">
+          <div className="text-xs opacity-80">Wallet</div>
+          <div className="font-mono">{short(addr)}</div>
+          <div className="text-xs mt-1">
+            {loading ? (
+              "Checking tier…"
+            ) : err ? (
+              <span className="text-red-300">{err}</span>
+            ) : (
+              <>
+                {tierName ? `Tier: ` : null}
+                <b>{tierName || "FREE"}</b>
+                {typeof amount === "number" ? ` • ${amount.toLocaleString()} $CRUSH` : null}
+              </>
+            )}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => onRefresh?.()}
+              disabled={loading}
+              className="px-2 py-1 rounded-lg bg-pink-500/30 hover:bg-pink-500/40 text-white text-xs"
+            >
+              {loading ? "…" : "Refresh"}
+            </button>
+            <button
+              onClick={() => onDisconnect?.()}
+              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs"
+            >
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -126,6 +217,7 @@ export default function Home() {
   /* ---------- WALLET + GATE ---------- */
   const [wallet, setWallet] = useState(null);
   const [holdBalance, setHoldBalance] = useState(0);
+  const [tierName, setTierName] = useState("");
   const [checking, setChecking] = useState(false);
   const [gateError, setGateError] = useState("");
 
@@ -155,6 +247,7 @@ export default function Home() {
     } catch {}
     setWallet(null);
     setHoldBalance(0);
+    setTierName("");
     try {
       localStorage.removeItem("crush_wallet");
     } catch {}
@@ -165,9 +258,10 @@ export default function Home() {
     setChecking(true);
     setGateError("");
     try {
-      const bal = await getCrushBalance(pubkey);
-      setHoldBalance(bal);
-    } catch {
+      const { amount, tierName } = await fetchTier(pubkey);
+      setHoldBalance(amount);
+      setTierName(tierName);
+    } catch (e) {
       setGateError("Balance check failed. Try again.");
     } finally {
       setChecking(false);
@@ -244,8 +338,12 @@ export default function Home() {
     } catch {}
   }
 
-  // push latest XP/level to Supabase leaderboard
+  // push latest XP/level to Supabase leaderboard (alpha-guarded)
   async function updateLeaderboard(newXp, newLevel) {
+    if (!HAS_SUPABASE) {
+      // quietly no-op in alpha
+      return;
+    }
     try {
       const walletId =
         localStorage.getItem("crush_wallet") ||
@@ -350,6 +448,20 @@ export default function Home() {
       <Head>
         <title>Crush AI 💘</title>
       </Head>
+
+      {/* Wallet Pill (top-right) */}
+      {mounted && (
+        <WalletPill
+          addr={wallet}
+          tierName={tierName}
+          amount={holdBalance}
+          loading={checking}
+          err={gateError}
+          onConnect={connectWallet}
+          onRefresh={refreshBalance}
+          onDisconnect={disconnectWallet}
+        />
+      )}
 
       {/* Floating Emoji Layer */}
       {mounted && (
@@ -612,7 +724,7 @@ export default function Home() {
               <div className="shimmer"></div>
               <div className="text-white text-center">
                 <div className="text-2xl font-bold mb-1">🔒 Hold $CRUSH to Chat</div>
-                <div className="text-pink-100/90 mb-4">
+                <div className="text-pink-100/90 mb-2">
                   Connect Phantom and hold at least <b>{MIN_HOLD}</b> $CRUSH to unlock Xenia.
                 </div>
 
@@ -651,6 +763,9 @@ export default function Home() {
 
                 <div className="text-pink-50">
                   Your $CRUSH: <b>{holdBalance.toLocaleString()}</b>
+                  {tierName ? (
+                    <span className="opacity-90"> &nbsp;•&nbsp; Tier: <b>{tierName}</b></span>
+                  ) : null}
                   {wallet && (
                     <span className="opacity-80">
                       {" "}
@@ -687,6 +802,7 @@ export default function Home() {
 
       {/* ---------- FULL-SCREEN CHAT OVERLAY ---------- */}
       <ChatOverlay open={isHolder && chatOpen} onClose={() => setChatOpen(false)}>
+        {/* ChatBox should NOT request signatures; it only receives wallet for context */}
         <ChatBox personaName="Xenia" stream={true} wallet={wallet} onMessageSent={handleXpGain} cooldownSeconds={10} className="mx-auto" />
       </ChatOverlay>
 
