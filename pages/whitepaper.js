@@ -155,7 +155,6 @@ export default function WhitepaperPage() {
             <Tier title="Tier 3 — VIP" emoji="💎" desc="NSFW galleries, exclusive scenes, priority requests." />
             <Tier title="Tier 4 — Goddess" emoji="👑" desc="Custom AI experiences, early access drops." />
           </div>
-          <p className="muted">Note: “Voice notes” are not part of Tier 2.</p>
         </section>
 
         {/* MODELS */}
