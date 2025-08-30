@@ -1,17 +1,18 @@
 // pages/buy.js
+import Head from "next/head";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /** ──────────────────────────────────────────────────────────────────────────
  *  CONFIG
  *  - Correct default mint (with trailing G).
  *  - Set NEXT_PUBLIC_CRUSH_MINT in Vercel to override.
- *  - Auto refresh every REFRESH_MS (can be disabled by setting to 0).
+ *  - Auto refresh every REFRESH_MS (set 0 to disable).
  *  ────────────────────────────────────────────────────────────────────────── */
 const MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
   "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
 
-const REFRESH_MS = 120_000; // 2 min auto refresh; set 0 to disable
+const REFRESH_MS = 120_000; // 2 min
 
 /** Helpers */
 const fmtUSD = (n) => {
@@ -26,8 +27,6 @@ const withTimeout = (p, ms = 9000) =>
 
 export default function BuyPage() {
   const [copied, setCopied] = useState(false);
-
-  // Raw numeric stats; we format in the UI
   const [stats, setStats] = useState({
     priceUsd: null,          // number
     marketCapUsd: null,      // number
@@ -35,7 +34,6 @@ export default function BuyPage() {
     liquidityUsd: null,      // number
     pairUrl: null,
   });
-
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -59,9 +57,7 @@ export default function BuyPage() {
 
   /** ────────────────────────────────────────────────────────────────────────
    *  DATA PIPELINE (API → Dexscreener → Jupiter → RPC/Solscan)
-   *  IMPORTANT: We never show FDV. If Dexscreener's marketCap is missing,
-   *  we compute an *estimated* market cap from (total supply × price) and
-   *  mark it with a small "est." badge in the UI.
+   *  IMPORTANT: Never show FDV. If DS marketCap missing → estimate via supply×price.
    *  ──────────────────────────────────────────────────────────────────────── */
   async function fetchFromAPI(mint) {
     try {
@@ -74,7 +70,7 @@ export default function BuyPage() {
       return {
         priceUsd: price,
         marketCapUsd: mc,
-        marketCapIsEst: false, // the API already prefers MC; if it's an estimate, it should say so (optional)
+        marketCapIsEst: false,
         liquidityUsd: liq,
         pairUrl: j?.pairUrl || null,
         ok: true,
@@ -92,11 +88,11 @@ export default function BuyPage() {
       if (!pair) return { ok: false };
       const price = Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null;
       const liq = Number.isFinite(Number(pair?.liquidity?.usd)) ? Number(pair.liquidity.usd) : null;
-      // 🚫 DO NOT use FDV. Only use Dexscreener marketCap if present.
+      // 🚫 DO NOT use FDV. Only DS marketCap if present.
       const mc = Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : null;
       return {
         priceUsd: price,
-        marketCapUsd: mc, // null if DS doesn't have MC
+        marketCapUsd: mc,
         marketCapIsEst: false,
         liquidityUsd: liq,
         pairUrl: pair?.url || null,
@@ -166,7 +162,7 @@ export default function BuyPage() {
       setLoadError("");
     }
     try {
-      // 1) Try our API (if present)
+      // 1) Try our API
       const api = await fetchFromAPI(MINT);
       if (api.ok) {
         setStats(api);
@@ -178,15 +174,13 @@ export default function BuyPage() {
       // 2) Dexscreener
       const ds = await fetchDexscreener(MINT);
 
-      // 3) Compose price
+      // 3) Price
       const price = ds.priceUsd ?? (await fetchJupiterPrice(MINT));
 
-      // 4) Compose liquidity
+      // 4) Liquidity
       const liq = ds.liquidityUsd ?? null;
 
-      // 5) Market Cap strategy:
-      //    - Prefer Dexscreener's marketCap (if provided)
-      //    - Else compute ESTIMATE from (total supply × price)
+      // 5) Market Cap: prefer DS MC; else estimate supply×price
       let mc = ds.marketCapUsd ?? null;
       let mcIsEst = false;
 
@@ -194,7 +188,7 @@ export default function BuyPage() {
         const supply = await fetchSupplyRPCOrSolscan(MINT);
         if (supply != null) {
           mc = supply * price;
-          mcIsEst = true; // mark as estimate in UI
+          mcIsEst = true;
         }
       }
 
@@ -207,7 +201,7 @@ export default function BuyPage() {
       });
       setLastUpdated(Date.now());
       setLoading(false);
-    } catch (e) {
+    } catch {
       setLoadError("Failed to load token stats. Try Refresh.");
       setLoading(false);
     }
@@ -232,6 +226,12 @@ export default function BuyPage() {
 
   return (
     <div className="page">
+      <Head>
+        {/* help the first fetch succeed quickly */}
+        <link rel="preconnect" href="https://api.dexscreener.com" />
+        <link rel="preconnect" href="https://price.jup.ag" />
+      </Head>
+
       {/* HERO */}
       <section className="hero">
         <div className="hero-glow" aria-hidden />
@@ -318,14 +318,8 @@ export default function BuyPage() {
           {/* fun ticker (placeholder) */}
           <div className="ticker">
             <div className="ticker-track">
-              {[
-                { id: 0, side: "Buy", count: 12 },
-                { id: 1, side: "Sell", count: 5 },
-                { id: 2, side: "Buy", count: 21 },
-              ].map((t) => (
-                <span key={t.id} className={`tick ${t.side.toLowerCase()}`}>
-                  {t.side} • {t.count} tx
-                </span>
+              {[{ id: 0, side: "Buy", count: 12 }, { id: 1, side: "Sell", count: 5 }, { id: 2, side: "Buy", count: 21 }].map((t) => (
+                <span key={t.id} className={`tick ${t.side.toLowerCase()}`}>{t.side} • {t.count} tx</span>
               ))}
             </div>
           </div>
@@ -356,30 +350,19 @@ export default function BuyPage() {
 
       {/* FAQ / RISK */}
       <section className="faq">
-        <details>
-          <summary>Is $Crush live on DEXs?</summary>
+        <details><summary>Is $Crush live on DEXs?</summary>
           <p>Trading may be limited while we finalize launch. Links here will update automatically when live.</p>
         </details>
-        <details>
-          <summary>Where do fees/referrals go?</summary>
+        <details><summary>Where do fees/referrals go?</summary>
           <p>We use them to fund development, liquidity adds, burns, and creator content.</p>
         </details>
         <p className="risk">⚠️ <b>Risk note:</b> Crypto is volatile. Always do your own research. Only spend what you can afford to lose.</p>
       </section>
 
       <style jsx>{`
-        .page {
-          min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-          padding: 4rem 1rem 6rem; color: #fff; position: relative;
-        }
-
-        /* HERO */
+        .page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 4rem 1rem 6rem; color: #fff; position: relative; }
         .hero { width: 100%; max-width: 1100px; display: grid; place-items: center; text-align: center; margin-bottom: 1.6rem; position: relative; }
-        .hero-glow {
-          position: absolute; inset: -60px -20px auto -20px; height: 320px;
-          background: radial-gradient(circle at 50% 50%, #fa1a81aa, #e098f866 35%, #b5fffc33 60%, transparent 70%);
-          filter: blur(42px); z-index: 0; pointer-events: none; opacity: 0.9; animation: pulse 5.8s ease-in-out infinite;
-        }
+        .hero-glow { position: absolute; inset: -60px -20px auto -20px; height: 320px; background: radial-gradient(circle at 50% 50%, #fa1a81aa, #e098f866 35%, #b5fffc33 60%, transparent 70%); filter: blur(42px); z-index: 0; pointer-events: none; opacity: 0.9; animation: pulse 5.8s ease-in-out infinite; }
         @keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.82; } 50% { transform: scale(1.05); opacity: 1; } }
         .hero-inner { position: relative; z-index: 2; }
         .kiss { font-size: 3.2rem; animation: kisspop 2.2s infinite cubic-bezier(0.52,-0.19,0.7,1.41); }
@@ -388,83 +371,41 @@ export default function BuyPage() {
         .title .accent { color: #ffb6d5; }
         .tagline { color: #ffd1ec; text-shadow: 0 0 8px #fa1a81aa; }
 
-        /* STATS */
-        .stats-wrap {
-          display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr));
-          gap: 12px; width: 100%; max-width: 900px; margin-top: 1.2rem;
-        }
+        .stats-wrap { display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap: 12px; width: 100%; max-width: 900px; margin-top: 1.2rem; }
         @media (min-width: 680px) { .stats-wrap { grid-template-columns: repeat(4, minmax(160px, 1fr)); } }
-        .stat-card {
-          background: linear-gradient(135deg, #ffb6d52b, #e098f826);
-          border: 1.6px solid #ffd1ec66; border-radius: 16px; padding: 14px 16px;
-          backdrop-filter: blur(6px) saturate(1.05); box-shadow: 0 6px 18px #fa1a8122;
-          display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
-        }
+        .stat-card { background: linear-gradient(135deg, #ffb6d52b, #e098f826); border: 1.6px solid #ffd1ec66; border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(6px) saturate(1.05); box-shadow: 0 6px 18px #fa1a8122; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; }
         .stat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .stat-card span { color: #ffd1ec; font-size: 0.95rem; }
         .stat-card b { font-size: 1.18rem; margin-top: 0; }
         .stat-card.link { cursor: pointer; text-decoration: none; transition: transform 0.15s ease; }
         .stat-card.link:hover { transform: translateY(-2px); }
-        .est-badge {
-          margin-left: 6px; padding: 2px 6px; border-radius: 999px; font-size: 0.7rem; font-weight: 800;
-          color: #fff; background: #fa1a81; border: 1px solid #ffd1ecaa; box-shadow: 0 2px 8px #fa1a8160;
-        }
+        .est-badge { margin-left: 6px; padding: 2px 6px; border-radius: 999px; font-size: 0.7rem; font-weight: 800; color: #fff; background: #fa1a81; border: 1px solid #ffd1ecaa; box-shadow: 0 2px 8px #fa1a8160; }
 
-        /* STATUS ROW */
         .status-row { width: 100%; max-width: 900px; display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
         .status-left { color: #ffd1ec; display: flex; align-items: center; gap: 8px; }
         .dot { width: 8px; height: 8px; border-radius: 999px; background: #b5fffc; display: inline-block; box-shadow: 0 0 10px #b5fffc; }
         .error { color: #ffd1ec; opacity: 0.9; }
-        .mini {
-          font-size: 0.85rem; padding: 6px 10px; border-radius: 10px; border: 1px solid #ffd1ec88;
-          background: #ffffff14; color: #fff; cursor: pointer; font-weight: 700;
-        }
+        .mini { font-size: 0.85rem; padding: 6px 10px; border-radius: 10px; border: 1px solid #ffd1ec88; background: #ffffff14; color: #fff; cursor: pointer; font-weight: 700; }
         .mini.refresh { margin-left: auto; }
         .mini.outline { background: transparent; }
         .mini:disabled { opacity: 0.6; cursor: default; }
 
-        /* CONTRACT */
         .contract { width: 100%; max-width: 900px; margin: 10px auto 6px; }
-        .contract-box {
-          display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
-          background: linear-gradient(135deg, #ffb6d53a, #b5fffc22);
-          border: 1.6px solid #ffd1ec88; border-radius: 16px; padding: 14px 16px;
-        }
+        .contract-box { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: linear-gradient(135deg, #ffb6d53a, #b5fffc22); border: 1.6px solid #ffd1ec88; border-radius: 16px; padding: 14px 16px; }
         .label { color: #ffd1ec; }
-        .mint {
-          grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-          background: #ffffff10; border: 1px solid #ffffff22; padding: 8px 10px; border-radius: 12px;
-        }
-        .copy {
-          grid-column: 2 / 3; justify-self: end; padding: 10px 14px; border-radius: 12px;
-          background: #fa1a81; border: 1px solid #ffd1ecaa; color: #fff; font-weight: 700; box-shadow: 0 8px 18px #fa1a8166;
-          transition: transform 0.1s ease;
-        }
+        .mint { grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: #ffffff10; border: 1px solid #ffffff22; padding: 8px 10px; border-radius: 12px; }
+        .copy { grid-column: 2 / 3; justify-self: end; padding: 10px 14px; border-radius: 12px; background: #fa1a81; border: 1px solid #ffd1ecaa; color: #fff; font-weight: 700; box-shadow: 0 8px 18px #fa1a8166; transition: transform 0.1s ease; }
         .copy:active { transform: scale(0.98); }
         .contract-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-        .mini-btn {
-          padding: 8px 10px; border-radius: 10px; border: 1px solid #ffd1ec88;
-          background: #ffffff14; color: #fff; text-decoration: none; font-weight: 600;
-        }
+        .mini-btn { padding: 8px 10px; border-radius: 10px; border: 1px solid #ffd1ec88; background: #ffffff14; color: #fff; text-decoration: none; font-weight: 600; }
 
-        /* BUY WIDGET */
         .buy-widget { width: 100%; max-width: 900px; margin: 18px auto 10px; }
-        .widget-card {
-          position: relative; border-radius: 18px; border: 1.8px solid #ffd1ec88;
-          background: linear-gradient(135deg, #fa1a8188, #e098f844);
-          box-shadow: 0 12px 36px #fa1a812e, 0 4px 16px #b5fffccc; padding: 18px; overflow: hidden;
-        }
+        .widget-card { position: relative; border-radius: 18px; border: 1.8px solid #ffd1ec88; background: linear-gradient(135deg, #fa1a8188, #e098f844); box-shadow: 0 12px 36px #fa1a812e, 0 4px 16px #b5fffccc; padding: 18px; overflow: hidden; }
         .widget-title { font-size: 1.4rem; font-weight: 800; margin-bottom: 6px; }
         .widget-sub { color: #ffe6f3; margin-bottom: 12px; }
         .quick-buys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
         @media (min-width: 560px) { .quick-buys { grid-template-columns: repeat(4, 1fr); } }
-        .quick-btn {
-          text-align: center; padding: 12px 10px; border-radius: 14px; font-weight: 800; color: #fff;
-          border: 1.6px solid #ffd1ecaa; background: linear-gradient(135deg, #ff6aa9, #e098f8);
-          text-decoration: none; box-shadow: 0 10px 20px #fa1a8160;
-          transition: transform 0.12s ease, box-shadow 0.12s ease;
-        }
+        .quick-btn { text-align: center; padding: 12px 10px; border-radius: 14px; font-weight: 800; color: #fff; border: 1.6px solid #ffd1ecaa; background: linear-gradient(135deg, #ff6aa9, #e098f8); text-decoration: none; box-shadow: 0 10px 20px #fa1a8160; transition: transform 0.12s ease, box-shadow 0.12s ease; }
         .quick-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 28px #fa1a8177; }
         .quick-btn.outline { background: #ffffff18; }
 
@@ -475,51 +416,29 @@ export default function BuyPage() {
         .tick.sell { color: #ffd1ec; }
         @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
-        /* TIERS */
         .tiers { width: 100%; max-width: 1100px; margin: 28px auto 10px; text-align: center; }
         .tiers-title { font-size: 1.4rem; margin-bottom: 14px; }
         .grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 12px; }
         @media (min-width: 700px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-        .tier {
-          position: relative; border-radius: 16px; padding: 14px; background: linear-gradient(135deg, #ffb6d52b, #b5fffc22);
-          border: 1.6px solid #ffd1ec88; min-height: 130px; box-shadow: 0 10px 24px #fa1a8120;
-          transition: transform 0.18s ease, box-shadow 0.18s ease;
-        }
+        .tier { position: relative; border-radius: 16px; padding: 14px; background: linear-gradient(135deg, #ffb6d52b, #b5fffc22); border: 1.6px solid #ffd1ec88; min-height: 130px; box-shadow: 0 10px 24px #fa1a8120; transition: transform 0.18s ease, box-shadow 0.18s ease; }
         .tier:hover { transform: translateY(-3px); box-shadow: 0 14px 34px #fa1a8133; }
         .tier .emoji { font-size: 1.8rem; }
         .tier .name { font-weight: 800; margin: 6px 0 4px; }
         .tier .desc { color: #ffe6f3; font-size: 0.95rem; }
 
-        /* HOW */
         .how { width: 100%; max-width: 900px; margin: 26px auto 8px; }
         .how-title { font-size: 1.3rem; margin-bottom: 8px; }
         .steps { display: grid; gap: 8px; counter-reset: step; }
-        .steps li {
-          background: #ffffff12; border: 1px solid #ffd1ec66; border-radius: 12px; padding: 10px 12px;
-          list-style: none; position: relative;
-        }
-        .steps li::before {
-          counter-increment: step; content: counter(step); position: absolute; left: -8px; top: -8px;
-          background: #fa1a81; color: #fff; font-weight: 900; width: 24px; height: 24px; display: grid; place-items: center;
-          border-radius: 999px; border: 2px solid #ffd1ecbb; box-shadow: 0 6px 14px #fa1a8166;
-        }
+        .steps li { background: #ffffff12; border: 1px solid #ffd1ec66; border-radius: 12px; padding: 10px 12px; list-style: none; position: relative; }
+        .steps li::before { counter-increment: step; content: counter(step); position: absolute; left: -8px; top: -8px; background: #fa1a81; color: #fff; font-weight: 900; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; border: 2px solid #ffd1ecbb; box-shadow: 0 6px 14px #fa1a8166; }
 
-        /* FAQ */
         .faq { width: 100%; max-width: 900px; margin: 18px auto 60px; }
         details { background: #ffffff12; border: 1px solid #ffd1ec66; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
         summary { cursor: pointer; font-weight: 800; }
         .risk { margin-top: 10px; color: #ffd1ec; }
 
-        /* Skeleton shimmer */
-        .skel {
-          display: inline-block; height: 1.1em; border-radius: 6px; background: #ffffff22; overflow: hidden;
-          position: relative; top: 2px; box-shadow: inset 0 0 0 1px #ffffff11;
-        }
-        .skel::after {
-          content: ""; position: absolute; inset: 0; transform: translateX(-100%);
-          background: linear-gradient(90deg, transparent, #ffffff44, transparent);
-          animation: shimmer 1.3s infinite;
-        }
+        .skel { display: inline-block; height: 1.1em; border-radius: 6px; background: #ffffff22; overflow: hidden; position: relative; top: 2px; box-shadow: inset 0 0 0 1px #ffffff11; }
+        .skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, #ffffff44, transparent); animation: shimmer 1.3s infinite; }
         @keyframes shimmer { 100% { transform: translateX(100%); } }
       `}</style>
     </div>
