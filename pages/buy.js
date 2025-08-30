@@ -2,6 +2,11 @@
 import Head from "next/head";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+/** Dexscreener pair URL override (always use this link) */
+const DEXS_PAIR_URL =
+  process.env.NEXT_PUBLIC_DEXS_PAIR_URL ||
+  "https://dexscreener.com/solana/3ri2e962g9snce44iuovg817dmeqkbnsbtekhghcf8rk";
+
 /** ──────────────────────────────────────────────────────────────────────────
  *  CONFIG
  *  - Correct default mint (with trailing G).
@@ -49,9 +54,9 @@ export default function BuyPage() {
       fifty: `${jupBase}?exactOut=0&amount=50`,
       hundred: `${jupBase}?exactOut=0&amount=100`,
       pump: `https://pump.fun/coin/${MINT}`,
-      dexsPair: null,
+      dexsPair: DEXS_PAIR_URL,                               // ✅ force your pair
       dexsSearch: `https://dexscreener.com/solana?query=${MINT}`,
-      dexs: `https://dexscreener.com/solana/${MINT}`, // direct by mint (works when indexed)
+      dexs: `https://dexscreener.com/solana/${MINT}`,        // (kept for completeness)
       solscan: `https://solscan.io/token/${MINT}`,
       birdeye: `https://birdeye.so/token/${MINT}?chain=solana`,
     }),
@@ -236,7 +241,8 @@ export default function BuyPage() {
     } catch {}
   }
 
-  const chartHref = stats.pairUrl || buyLinks.dexsSearch;
+  /** Force the chart to open the provided Dexscreener pair URL */
+  const chartHref = buyLinks.dexsPair || stats.pairUrl || buyLinks.dexsSearch;
 
   return (
     <div className="page">
@@ -325,9 +331,10 @@ export default function BuyPage() {
           <button className="copy" onClick={copyMint}>{copied ? "Copied!" : "Copy"}</button>
         </div>
         <div className="contract-links">
-          <a href={buyLinks.solscan} target="_blank" rel="noreferrer" className="mini-btn">Solscan</a>
-          <a href={buyLinks.dexsSearch} target="_blank" rel="noreferrer" className="mini-btn">Dexscreener</a>
+          {/* ✅ Use the hardwired Dexscreener pair here too */}
+          <a href={buyLinks.dexsPair} target="_blank" rel="noreferrer" className="mini-btn">Dexscreener</a>
           <a href={buyLinks.birdeye} target="_blank" rel="noreferrer" className="mini-btn">Birdeye</a>
+          <a href={buyLinks.solscan} target="_blank" rel="noreferrer" className="mini-btn">Solscan</a>
           <a href={buyLinks.pump} target="_blank" rel="noreferrer" className="mini-btn">Pump.fun</a>
         </div>
       </section>
