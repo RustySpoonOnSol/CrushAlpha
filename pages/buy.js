@@ -33,6 +33,7 @@ export default function BuyPage() {
     marketCapIsEst: false,   // flag when we computed supply*price
     liquidityUsd: null,      // number
     pairUrl: null,
+    noData: true,
   });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -48,7 +49,9 @@ export default function BuyPage() {
       fifty: `${jupBase}?exactOut=0&amount=50`,
       hundred: `${jupBase}?exactOut=0&amount=100`,
       pump: `https://pump.fun/coin/${MINT}`,
-      dexs: `https://dexscreener.com/solana/${MINT}`,
+      dexsPair: null,
+      dexsSearch: `https://dexscreener.com/solana?query=${MINT}`,
+      dexs: `https://dexscreener.com/solana/${MINT}`, // direct by mint (works when indexed)
       solscan: `https://solscan.io/token/${MINT}`,
       birdeye: `https://birdeye.so/token/${MINT}?chain=solana`,
     }),
@@ -56,7 +59,7 @@ export default function BuyPage() {
   );
 
   /** ────────────────────────────────────────────────────────────────────────
-   *  DATA PIPELINE (API → Dexscreener → Jupiter → RPC/Solscan)
+   *  DATA PIPELINE (Primary API; client fallbacks only if needed)
    *  IMPORTANT: Never show FDV. If DS marketCap missing → estimate via supply×price.
    *  ──────────────────────────────────────────────────────────────────────── */
   async function fetchFromAPI(mint) {
@@ -64,15 +67,20 @@ export default function BuyPage() {
       const r = await withTimeout(fetch(`/api/token-stats?mint=${encodeURIComponent(mint)}`), 9000);
       if (!r.ok) throw new Error("api not available");
       const j = await r.json();
+
+      const price = Number.isFinite(j?.priceUsd) ? Number(j.priceUsd) : null;
       const mc = Number.isFinite(j?.marketCapUsd) ? Number(j.marketCapUsd) : null;
       const liq = Number.isFinite(j?.liquidityUsd) ? Number(j.liquidityUsd) : null;
-      const price = Number.isFinite(j?.priceUsd) ? Number(j.priceUsd) : null;
+
+      const noData = price == null && mc == null && liq == null;
+
       return {
         priceUsd: price,
         marketCapUsd: mc,
-        marketCapIsEst: false,
+        marketCapIsEst: j?.source?.mc === "estimated",
         liquidityUsd: liq,
         pairUrl: j?.pairUrl || null,
+        noData,
         ok: true,
       };
     } catch {
@@ -80,6 +88,7 @@ export default function BuyPage() {
     }
   }
 
+  // Extra client-side fallbacks (keep light)
   async function fetchDexscreener(mint) {
     try {
       const r = await withTimeout(fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`), 9000);
@@ -88,14 +97,14 @@ export default function BuyPage() {
       if (!pair) return { ok: false };
       const price = Number.isFinite(Number(pair.priceUsd)) ? Number(pair.priceUsd) : null;
       const liq = Number.isFinite(Number(pair?.liquidity?.usd)) ? Number(pair.liquidity.usd) : null;
-      // 🚫 DO NOT use FDV. Only DS marketCap if present.
-      const mc = Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : null;
+      const mc = Number.isFinite(Number(pair.marketCap)) ? Number(pair.marketCap) : null; // 🚫 not FDV
       return {
         priceUsd: price,
         marketCapUsd: mc,
         marketCapIsEst: false,
         liquidityUsd: liq,
         pairUrl: pair?.url || null,
+        noData: price == null && mc == null && liq == null,
         ok: true,
       };
     } catch {
@@ -162,7 +171,7 @@ export default function BuyPage() {
       setLoadError("");
     }
     try {
-      // 1) Try our API
+      // 1) Try our API (server-side fallbacks, cache)
       const api = await fetchFromAPI(MINT);
       if (api.ok) {
         setStats(api);
@@ -171,10 +180,10 @@ export default function BuyPage() {
         return;
       }
 
-      // 2) Dexscreener
+      // 2) Dexscreener (client)
       const ds = await fetchDexscreener(MINT);
 
-      // 3) Price
+      // 3) Price fallback
       const price = ds.priceUsd ?? (await fetchJupiterPrice(MINT));
 
       // 4) Liquidity
@@ -192,12 +201,15 @@ export default function BuyPage() {
         }
       }
 
+      const noData = (price == null && mc == null && liq == null);
+
       setStats({
         priceUsd: price ?? null,
         marketCapUsd: mc ?? null,
         marketCapIsEst: mcIsEst,
         liquidityUsd: liq,
         pairUrl: ds.pairUrl ?? null,
+        noData,
       });
       setLastUpdated(Date.now());
       setLoading(false);
@@ -223,6 +235,8 @@ export default function BuyPage() {
       setTimeout(() => setCopied(false), 1200);
     } catch {}
   }
+
+  const chartHref = stats.pairUrl || buyLinks.dexsSearch;
 
   return (
     <div className="page">
@@ -253,7 +267,11 @@ export default function BuyPage() {
               {loading ? "…" : "Refresh"}
             </button>
           </div>
-          <b>{loading ? <Skeleton w={72} /> : stats.priceUsd != null ? `$${stats.priceUsd.toFixed(6)}` : "—"}</b>
+          <b>
+            {loading ? <Skeleton w={72} /> :
+              stats.noData ? "Not trading" :
+              stats.priceUsd != null ? `$${stats.priceUsd.toFixed(6)}` : "—"}
+          </b>
         </div>
 
         <div className="stat-card">
@@ -261,15 +279,23 @@ export default function BuyPage() {
             <span>📊 Market Cap</span>
             {stats.marketCapIsEst ? <small className="est-badge">est.</small> : null}
           </div>
-          <b>{loading ? <Skeleton w={68} /> : fmtUSD(stats.marketCapUsd)}</b>
+          <b>
+            {loading ? <Skeleton w={68} /> :
+              stats.noData ? "No market data" :
+              fmtUSD(stats.marketCapUsd)}
+          </b>
         </div>
 
         <div className="stat-card">
           <span>💧 Liquidity</span>
-          <b>{loading ? <Skeleton w={58} /> : fmtUSD(stats.liquidityUsd)}</b>
+          <b>
+            {loading ? <Skeleton w={58} /> :
+              stats.noData ? "Untracked" :
+              fmtUSD(stats.liquidityUsd)}
+          </b>
         </div>
 
-        <a className="stat-card link" href={stats.pairUrl || buyLinks.dexs} target="_blank" rel="noreferrer">
+        <a className="stat-card link" href={chartHref} target="_blank" rel="noreferrer">
           <span>🔎 Chart</span>
           <b>Open</b>
         </a>
@@ -278,7 +304,11 @@ export default function BuyPage() {
       {/* status row */}
       <div className="status-row">
         <div className="status-left">
-          <span className="dot" /> {lastUpdated ? `Updated ${new Date(lastUpdated).toLocaleTimeString()}` : "Fetching…"}
+          <span className={`dot ${stats.noData ? "warn" : ""}`} />
+          {lastUpdated ? `Updated ${new Date(lastUpdated).toLocaleTimeString()}` : "Fetching…"}
+          {stats.noData && (
+            <span className="muted"> · No indexed pools found yet — token may be inactive.</span>
+          )}
           {loadError && <span className="error"> · {loadError}</span>}
         </div>
         <div className="status-right">
@@ -296,7 +326,7 @@ export default function BuyPage() {
         </div>
         <div className="contract-links">
           <a href={buyLinks.solscan} target="_blank" rel="noreferrer" className="mini-btn">Solscan</a>
-          <a href={buyLinks.dexs} target="_blank" rel="noreferrer" className="mini-btn">Dexscreener</a>
+          <a href={buyLinks.dexsSearch} target="_blank" rel="noreferrer" className="mini-btn">Dexscreener</a>
           <a href={buyLinks.birdeye} target="_blank" rel="noreferrer" className="mini-btn">Birdeye</a>
           <a href={buyLinks.pump} target="_blank" rel="noreferrer" className="mini-btn">Pump.fun</a>
         </div>
@@ -384,6 +414,8 @@ export default function BuyPage() {
         .status-row { width: 100%; max-width: 900px; display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
         .status-left { color: #ffd1ec; display: flex; align-items: center; gap: 8px; }
         .dot { width: 8px; height: 8px; border-radius: 999px; background: #b5fffc; display: inline-block; box-shadow: 0 0 10px #b5fffc; }
+        .dot.warn { background: #ffd1ec; box-shadow: 0 0 10px #ffd1ec; }
+        .muted { color:#ffd1ec; opacity:.9; }
         .error { color: #ffd1ec; opacity: 0.9; }
         .mini { font-size: 0.85rem; padding: 6px 10px; border-radius: 10px; border: 1px solid #ffd1ec88; background: #ffffff14; color: #fff; cursor: pointer; font-weight: 700; }
         .mini.refresh { margin-left: auto; }
@@ -400,7 +432,7 @@ export default function BuyPage() {
         .mini-btn { padding: 8px 10px; border-radius: 10px; border: 1px solid #ffd1ec88; background: #ffffff14; color: #fff; text-decoration: none; font-weight: 600; }
 
         .buy-widget { width: 100%; max-width: 900px; margin: 18px auto 10px; }
-        .widget-card { position: relative; border-radius: 18px; border: 1.8px solid #ffd1ec88; background: linear-gradient(135deg, #fa1a8188, #e098f844); box-shadow: 0 12px 36px #fa1a812e, 0 4px 16px #b5fffccc; padding: 18px; overflow: hidden; }
+        .widget-card { position: relative; border-radius: 18px; border: 1.8px solid #ffd1ec88; background: linear-gradient(135deg, #fa1a8188, #e098f844); box-shadow: 0 12px 36px #fa1a812e, 0 4px 16px #b5fffc; padding: 18px; overflow: hidden; }
         .widget-title { font-size: 1.4rem; font-weight: 800; margin-bottom: 6px; }
         .widget-sub { color: #ffe6f3; margin-bottom: 12px; }
         .quick-buys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
