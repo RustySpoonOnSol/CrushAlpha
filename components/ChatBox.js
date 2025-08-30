@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 
 const CRUSH_MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
-  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJsk";
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
 
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const ALPHA_MODE =

@@ -1,29 +1,41 @@
 // pages/api/chat.js
 // Node runtime for Vercel, rate limit + read-only on-chain hold gate (NO signatures)
+// Streaming supported (SSE). Fault-tolerant RPC (primary + fallbacks + timeout).
 
 export const config = { runtime: "nodejs", api: { bodyParser: { sizeLimit: "1mb" } } };
 
-// ❌ Removed: tweetnacl / bs58 imports (no signatures)
 const DEFAULT_MODEL = "gpt-4o-mini";
 const MAX_INPUT_LEN = 4000;
 
-// simple IP rate limit
+// Simple IP rate limit
 const RL_WINDOW_MS = 15_000;
 const RL_MAX_HITS = 6;
 const rlMap = new Map();
 
-// per-wallet cooldown
+// Per-wallet cooldown
 const COOLDOWN_MS = 10_000;
 const lastSendMap = new Map();
 
+// Token + gate
 const MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
   "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
-const RPC =
-  process.env.SOLANA_RPC_PRIMARY ||
-  process.env.NEXT_PUBLIC_SOLANA_RPC ||
-  "https://api.mainnet-beta.solana.com";
+
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
+
+// RPC endpoints (primary → fallbacks → public)
+const HELIUS_KEY = process.env.HELIUS_API_KEY || "";
+const RPCS = [
+  process.env.SOLANA_RPC_PRIMARY,
+  process.env.SOLANA_RPC_FALLBACK,
+  process.env.NEXT_PUBLIC_SOLANA_RPC,
+  HELIUS_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "",
+  "https://api.mainnet-beta.solana.com",
+].filter(Boolean);
+
+const TIMEOUT_MS = 8000;
+
+// ────────────────────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
   try {
@@ -35,10 +47,11 @@ export default async function handler(req, res) {
     const key = process.env.OPENAI_API_KEY;
     if (!key) return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
 
+    // Rate limit per IP
     const ip = getIP(req);
     if (!allow(ip)) return res.status(429).json({ error: "Too many requests" });
 
-    const data = typeof req.body === "string" ? safeParse(req.body) : req.body || {};
+    const data = typeof req.body === "string" ? safeParse(req.body) : (req.body || {});
     const {
       message,
       history = [],
@@ -53,10 +66,11 @@ export default async function handler(req, res) {
     if (message.length > MAX_INPUT_LEN)
       return res.status(413).json({ error: "Message too long" });
 
-    // ❗ Read-only requirement: a wallet address must be provided for gating
+    // Read-only requirement: a wallet address must be provided for gating
     if (!wallet || typeof wallet !== "string" || wallet.length < 25)
       return res.status(401).json({ error: "Wallet required" });
 
+    // Per-wallet cooldown
     const now = Date.now();
     const last = lastSendMap.get(wallet) || 0;
     if (now - last < COOLDOWN_MS) {
@@ -65,7 +79,15 @@ export default async function handler(req, res) {
     }
 
     // On-chain hold gate (no signature)
-    const hold = await getCrushBalance(wallet, MINT).catch(() => -1);
+    let hold = -1;
+    try {
+      hold = await getCrushBalance(wallet, MINT);
+    } catch {
+      // fall through, handled below
+    }
+    if (hold < 0) {
+      return res.status(503).json({ error: "Hold check failed (RPC unavailable). Try again." });
+    }
     if (hold < MIN_HOLD) {
       return res.status(403).json({ error: `Hold at least ${MIN_HOLD} $CRUSH to chat`, hold });
     }
@@ -78,7 +100,7 @@ export default async function handler(req, res) {
 
     lastSendMap.set(wallet, now);
 
-    // streaming SSE?
+    // Streaming SSE?
     const stream = parseBool(getQuery(req, "stream"), true);
     if (stream) {
       res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -86,7 +108,7 @@ export default async function handler(req, res) {
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders?.();
 
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      const r = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, temperature, stream: true, messages, max_tokens: 300 }),
@@ -125,8 +147,8 @@ export default async function handler(req, res) {
       return res.end();
     }
 
-    // non-stream
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Non-stream
+    const r = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, temperature, messages, max_tokens: 300 }),
@@ -141,11 +163,16 @@ export default async function handler(req, res) {
   }
 }
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Prompts & helpers
+
 function systemPrompt(persona) {
-  return `You are ${persona}, a flirty, seductive AI girlfriend for the Crush AI experience.
-Keep replies short, playful, and teasing. Use light emojis (💋 😘 💖) but don't spam.
-Stay safe: refuse illegal/harmful requests. Encourage users to keep chatting.`;
+  return `You are ${persona} — Crush AI’s flirty muse.
+Tone: playful, teasing, warm; 1–3 sentences by default. Sprinkle emojis (💋 😘 💖) lightly.
+Boundaries: keep it consensual and safe; avoid explicit sexual content; no illegal/harmful guidance.
+Mirror the user's vibe, invite fun, and keep the conversation going.`;
 }
+
 function sanitizeHistory(arr) {
   if (!Array.isArray(arr)) return [];
   return arr
@@ -157,6 +184,7 @@ function sanitizeHistory(arr) {
     })
     .filter((m) => m.content);
 }
+
 function getIP(req) {
   return (
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
@@ -164,6 +192,7 @@ function getIP(req) {
     "unknown"
   );
 }
+
 function allow(ip) {
   const now = Date.now();
   const e = rlMap.get(ip) || { count: 0, ts: now };
@@ -176,6 +205,7 @@ function allow(ip) {
   rlMap.set(ip, e);
   return true;
 }
+
 function safeParse(s) {
   try {
     return JSON.parse(s);
@@ -183,26 +213,45 @@ function safeParse(s) {
     return null;
   }
 }
+
 function getQuery(req, key) {
   const u = new URL(req.url, "http://localhost");
   return u.searchParams.get(key);
 }
+
 function parseBool(v, fb = false) {
   if (v == null) return fb;
   const s = String(v).toLowerCase();
   return s === "1" || s === "true" || s === "yes" || s === "y";
 }
 
-async function rpc(method, params) {
-  const r = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const j = await r.json();
-  if (j.error) throw new Error(j.error?.message || "RPC error");
-  return j.result;
+// ────────────────────────────────────────────────────────────────────────────────
+// Fault-tolerant RPC and balance lookup (read-only)
+
+async function fetchWithTimeout(url, init = {}, ms = TIMEOUT_MS) {
+  return Promise.race([
+    fetch(url, init),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms)),
+  ]);
 }
+
+async function rpc(method, params) {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  const headers = { "content-type": "application/json" };
+  let lastErr;
+  for (const endpoint of RPCS) {
+    try {
+      const r = await fetchWithTimeout(endpoint, { method: "POST", headers, body }, TIMEOUT_MS);
+      const j = await r.json();
+      if (j?.error) throw new Error(j.error?.message || "rpc error");
+      return j.result;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("all RPCs failed");
+}
+
 async function getCrushBalance(owner, mint) {
   const tokAccs = await rpc("getTokenAccountsByOwner", [
     owner,
