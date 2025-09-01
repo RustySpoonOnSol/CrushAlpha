@@ -21,7 +21,7 @@ const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const NSFW_HOLD = Number(process.env.NEXT_PUBLIC_NSFW_HOLD ?? "2000");
 const GODDESS_HOLD = Number(process.env.NEXT_PUBLIC_GODDESS_HOLD ?? "5000");
 
-/** ===== Content Catalog (unchanged) ===== */
+/** ===== Content Catalog (kept) ===== */
 const VAULT = [
   {
     id: "opener-pack-01",
@@ -63,10 +63,10 @@ const VAULT = [
     images: [
       { src: "/xenia/sfw/tease-01.jpg", alt: "Xenia — playful pose" },
       { src: "/xenia/sfw/tease-02.jpg", alt: "Xenia — wink" },
-      { src: "/xenia/sfw/tease-03.jpg", alt: "Xenia — neon glow" },
+      { src: "/xenia/sfw/tease-3.jpg", alt: "Xenia — neon glow" },
     ],
   },
-  /** VIP: pay per image or free if user holds ≥ NSFW_HOLD */
+  // VIP pay-per-image; free if user holds ≥ NSFW_HOLD
   {
     id: "vip-gallery-01",
     type: "pay-images",
@@ -92,10 +92,7 @@ const VAULT = [
 
 /** ===== RPC helpers ===== */
 async function fetchWithTimeout(url, init = {}, ms = 8000) {
-  return Promise.race([
-    fetch(url, init),
-    new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms)),
-  ]);
+  return Promise.race([fetch(url, init), new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms))]);
 }
 async function rpc(method, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
@@ -114,13 +111,11 @@ async function rpc(method, params) {
 async function getCrushBalance(owner, mint) {
   const res = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
   let total = 0;
-  for (const v of res?.value || []) {
-    total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
-  }
+  for (const v of res?.value || []) total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
   return total;
 }
 
-/** ===== Pay-per-image helpers ===== */
+/** ===== Pay & Verify ===== */
 async function createPayment({ wallet, itemId }) {
   const r = await fetch("/api/pay/create", {
     method: "POST",
@@ -145,79 +140,95 @@ async function fetchEntitlements(wallet) {
   return (j?.items || []).map((x) => x.itemId);
 }
 
+/** ===== Auth (signed session) ===== */
+async function getChallenge(wallet) {
+  const r = await fetch(`/api/auth/challenge?wallet=${encodeURIComponent(wallet)}`);
+  if (!r.ok) throw new Error("Challenge failed");
+  return r.json(); // { wallet, nonce, ts, message }
+}
+async function postVerify(body) {
+  const r = await fetch("/api/auth/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("Verify failed");
+  return r.json();
+}
+async function getMe() {
+  const r = await fetch("/api/auth/me");
+  if (!r.ok) return { authed: false };
+  return r.json();
+}
+async function logoutSession() {
+  try { await fetch("/api/auth/logout"); } catch {}
+}
+function bytesToBase64(bytes) {
+  let bin = "";
+  const arr = Array.from(bytes);
+  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+  return btoa(bin);
+}
+
+/** ===== Page ===== */
 export default function MeetXenia() {
   const [mounted, setMounted] = useState(false);
 
-  // wallet & holding state
+  // wallet / auth
   const [wallet, setWallet] = useState("");
+  const [authed, setAuthed] = useState(false);
+
+  // balance & UX
   const [hold, setHold] = useState(0);
   const [checking, setChecking] = useState(false);
   const [err, setErr] = useState("");
-
-  // per-image unlocked flags for this session (after successful payment or restore)
   const [unlockedMap, setUnlockedMap] = useState({}); // { [itemId]: true }
-
-  // UX
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    try {
-      setReducedMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
-    } catch {}
+    try { setReducedMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches); } catch {}
   }, []);
 
-  // Helper: set active wallet safely (reset then hydrate)
+  // set wallet, clear session state, refresh
   const setActiveWallet = async (pk) => {
-    setWallet(pk);
-    setHold(0);
-    setUnlockedMap({});
+    setWallet(pk); setAuthed(false); setHold(0); setUnlockedMap({});
     try { localStorage.setItem("crush_wallet", pk); } catch {}
     await refreshHold(pk);
     try {
       const ids = await fetchEntitlements(pk);
-      setUnlockedMap((m) => {
-        const next = { ...m };
-        for (const id of ids) next[id] = true;
-        return next;
-      });
+      setUnlockedMap((m) => { const next = { ...m }; for (const id of ids) next[id] = true; return next; });
     } catch {}
+    try { const me = await getMe(); setAuthed(me.authed && me.wallet === pk); } catch {}
   };
 
-  // restore wallet; also subscribe to Phantom account changes
+  // init + subscribe Phantom account changes
   useEffect(() => {
     if (!mounted) return;
-
     const stored = localStorage.getItem("crush_wallet") || "";
 
-    // Phantom listeners
     if (window?.solana?.isPhantom) {
-      const onAcct = (pubkey) => {
+      const onAcct = async (pubkey) => {
         const next = pubkey?.toString?.() || pubkey || "";
+        await logoutSession(); // clear any previous signed session on swap
         if (!next) {
-          // disconnected
-          setWallet(""); setHold(0); setUnlockedMap({});
+          setWallet(""); setAuthed(false); setHold(0); setUnlockedMap({});
           try { localStorage.removeItem("crush_wallet"); } catch {}
         } else if (next !== wallet) {
-          setActiveWallet(next);
+          await setActiveWallet(next);
         }
       };
       try { window.solana.on?.("accountChanged", onAcct); } catch {}
+
       // try auto-connect
-      window.solana
-        .connect({ onlyIfTrusted: true })
-        .then((r) => {
-          const pk = r?.publicKey?.toString();
-          if (pk) setActiveWallet(pk);
-          else if (stored) setActiveWallet(stored);
-        })
-        .catch(() => { if (stored) setActiveWallet(stored); });
+      window.solana.connect({ onlyIfTrusted: true }).then(async (r) => {
+        const pk = r?.publicKey?.toString();
+        if (pk) await setActiveWallet(pk);
+        else if (stored) await setActiveWallet(stored);
+      }).catch(async () => { if (stored) await setActiveWallet(stored); });
 
       return () => { try { window.solana.removeListener?.("accountChanged", onAcct); } catch {} };
     }
 
     if (stored) setActiveWallet(stored);
-  }, [mounted, wallet]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
 
   async function connectWallet() {
     try {
@@ -235,33 +246,44 @@ export default function MeetXenia() {
     }
   }
 
+  async function secureLogin() {
+    try {
+      if (!wallet) return setErr("Connect wallet first");
+      if (!window.solana?.signMessage) return setErr("This wallet does not support signMessage");
+
+      const ch = await getChallenge(wallet);
+      const msgBytes = new TextEncoder().encode(ch.message);
+      const sig = await window.solana.signMessage(msgBytes, "utf8");
+      const signatureBase64 = bytesToBase64(new Uint8Array(sig.signature));
+
+      const v = await postVerify({ wallet, signatureBase64, nonce: ch.nonce, ts: ch.ts });
+      if (v?.ok) setAuthed(true);
+    } catch (e) {
+      setErr(e?.message || "Secure login failed");
+    }
+  }
+
   async function refreshHold(pk = wallet) {
     if (!pk) return;
     setChecking(true);
     setErr("");
-    try {
-      const bal = await getCrushBalance(pk, MINT);
-      setHold(bal);
-    } catch (e) {
-      setErr("Balance check failed. Try again.");
-    } finally {
-      setChecking(false);
-    }
+    try { setHold(await getCrushBalance(pk, MINT)); }
+    catch { setErr("Balance check failed. Try again."); }
+    finally { setChecking(false); }
   }
 
-  // Refresh button also re-syncs to Phantom's current account if changed silently
+  // also re-sync to Phantom current account if silently changed
   async function syncAndRefresh() {
     try {
       if (window?.solana?.isPhantom) {
         const r = await window.solana.connect({ onlyIfTrusted: true });
         const pk = r?.publicKey?.toString();
-        if (pk && pk !== wallet) {
-          await setActiveWallet(pk);
-          return;
-        }
+        if (pk && pk !== wallet) { await logoutSession(); await setActiveWallet(pk); return; }
+        if (!pk && wallet) { await logoutSession(); setWallet(""); setAuthed(false); setHold(0); setUnlockedMap({}); return; }
       }
     } catch {}
     await refreshHold(wallet);
+    try { const me = await getMe(); setAuthed(me.authed && me.wallet === wallet); } catch {}
   }
 
   const chatUnlocked = hold >= CHAT_MIN_HOLD;
@@ -276,17 +298,6 @@ export default function MeetXenia() {
       <Head>
         <title>Meet Xenia | Crush AI</title>
         <meta name="description" content="Xenia is your flirty AI girlfriend. Unlock hotter tiers with $CRUSH." />
-        <link rel="canonical" href="https://yourdomain.com/meet-xenia" />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content="Meet Xenia — your flirty AI" />
-        <meta property="og:description" content="Hold $CRUSH to unlock chat, NSFW gallery and custom scenes." />
-        <meta property="og:image" content="https://yourdomain.com/og-xenia.png" />
-        <meta property="og:url" content="https://yourdomain.com/meet-xenia" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Meet Xenia — your flirty AI" />
-        <meta name="twitter:description" content="Hold $CRUSH to unlock chat, NSFW gallery and custom scenes." />
-        <meta name="twitter:image" content="https://yourdomain.com/og-xenia.png" />
-        <meta name="theme-color" content="#fa1a81" />
       </Head>
 
       <main className="min-h-screen px-4 py-12 flex flex-col items-center">
@@ -299,10 +310,7 @@ export default function MeetXenia() {
         {/* WALLET / STATUS ROW */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
           {!wallet ? (
-            <button
-              onClick={connectWallet}
-              className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold"
-            >
+            <button onClick={connectWallet} className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">
               Connect Phantom
             </button>
           ) : (
@@ -310,36 +318,40 @@ export default function MeetXenia() {
               <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-sm text-white">
                 Wallet: <span className="font-mono">{wallet.slice(0, 4)}…{wallet.slice(-4)}</span>
               </div>
-              <button
-                onClick={syncAndRefresh}
-                disabled={checking}
-                className="px-3 py-2 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60"
-              >
+              {!authed ? (
+                <button onClick={secureLogin} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold">
+                  Secure Login
+                </button>
+              ) : (
+                <span className="px-3 py-2 rounded-xl bg-emerald-600/30 border border-emerald-400/40 text-emerald-100 text-sm">
+                  Session active
+                </span>
+              )}
+              <button onClick={syncAndRefresh} disabled={checking}
+                      className="px-3 py-2 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60">
                 {checking ? "Checking…" : "Refresh Balance"}
               </button>
               <button
                 onClick={async () => {
                   if (!wallet) return;
                   const ids = await fetchEntitlements(wallet);
-                  setUnlockedMap((m) => {
-                    const next = { ...m };
-                    for (const id of ids) next[id] = true;
-                    return next;
-                  });
+                  setUnlockedMap((m) => { const n = { ...m }; for (const id of ids) n[id] = true; return n; });
                 }}
                 className="px-3 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 text-sm font-semibold"
               >
                 Restore purchases
               </button>
               <button
-                onClick={() => { setWallet(""); setHold(0); setUnlockedMap({}); try { localStorage.removeItem("crush_wallet"); } catch {} }}
+                onClick={async () => {
+                  await logoutSession();
+                  setWallet(""); setAuthed(false); setHold(0); setUnlockedMap({});
+                  try { localStorage.removeItem("crush_wallet"); } catch {}
+                }}
                 className="px-3 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 text-sm font-semibold"
               >
                 Disconnect
               </button>
-              <div className="text-pink-50 text-sm">
-                Your $CRUSH: <b>{hold.toLocaleString()}</b>
-              </div>
+              <div className="text-pink-50 text-sm">Your $CRUSH: <b>{hold.toLocaleString()}</b></div>
             </>
           )}
           {err && <div className="text-pink-200 text-sm">{err}</div>}
@@ -350,48 +362,28 @@ export default function MeetXenia() {
           <TierCard
             title="Flirty Chat"
             desc={`Hold ≥ ${CHAT_MIN_HOLD.toLocaleString()} $CRUSH`}
-            features={["Playful, teasing conversation", "XP & levels for every spicy message", "Typing/streaming replies"]}
+            features={["Playful, teasing conversation", "XP & levels", "Typing/streaming replies"]}
             status={chatUnlocked ? "unlocked" : "locked"}
-            ctas={
-              chatUnlocked ? (
-                <Link href="/#xenia-chat" className="px-4 py-2 rounded-xl bg-pink-600 text-white font-semibold hover:bg-pink-500">
-                  Start chatting
-                </Link>
-              ) : (
-                <Link href="/buy" className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-600">
-                  Get $CRUSH
-                </Link>
-              )
-            }
+            ctas={chatUnlocked
+              ? <Link href="/#xenia-chat" className="px-4 py-2 rounded-xl bg-pink-600 text-white font-semibold hover:bg-pink-500">Start chatting</Link>
+              : <Link href="/buy" className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-600">Get $CRUSH</Link>}
           />
           <TierCard
             title="NSFW Gallery"
-            desc={`Hold ≥ ${NSFW_HOLD.toLocaleString()} $CRUSH  · or buy per image`}
+            desc={`Hold ≥ ${NSFW_HOLD.toLocaleString()} $CRUSH · or buy per image`}
             features={["Exclusive NSFW sets", "Buy single images with $CRUSH", "Cross-device unlocks (Supabase)"]}
-            status={nsfwUnlocked ? "unlocked" : "locked"}
-            ctas={
-              <div className="flex gap-2">
-                <Link href="/gallery" className="px-4 py-2 rounded-xl bg-pink-600 text-white font-semibold hover:bg-pink-500">
-                  Browse Gallery
-                </Link>
-                {!nsfwUnlocked && (
-                  <Link href="/buy" className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-600">
-                    Buy $CRUSH
-                  </Link>
-                )}
-              </div>
-            }
+            status={hold >= NSFW_HOLD ? "unlocked" : "locked"}
+            ctas={<div className="flex gap-2">
+              <Link href="/gallery" className="px-4 py-2 rounded-xl bg-pink-600 text-white font-semibold hover:bg-pink-500">Browse Gallery</Link>
+              {hold < NSFW_HOLD && <Link href="/buy" className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold hover:bg-pink-600">Buy $CRUSH</Link>}
+            </div>}
           />
           <TierCard
             title="Custom Scenes"
             desc="Coming soon"
             features={["Prompt Xenia to model custom scenes", "Higher tiers get priority", "Save & share sets"]}
             status="soon"
-            ctas={
-              <Link href="/whitepaper" className="px-4 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 font-semibold hover:bg-black/50">
-                Read the plan
-              </Link>
-            }
+            ctas={<Link href="/whitepaper" className="px-4 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 font-semibold hover:bg-black/50">Read the plan</Link>}
           />
         </div>
 
@@ -399,9 +391,7 @@ export default function MeetXenia() {
         <section className="w-full max-w-6xl mt-10">
           <div className="flex items-end justify-between mb-3">
             <h3 className="text-xl font-bold text-white">Xenia’s Content Vault</h3>
-            <div className="text-pink-100/90 text-sm">
-              Your balance: <b>{hold.toLocaleString()}</b> $CRUSH
-            </div>
+            <div className="text-pink-100/90 text-sm">Your balance: <b>{hold.toLocaleString()}</b> $CRUSH</div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -411,15 +401,16 @@ export default function MeetXenia() {
                 item={it}
                 hold={hold}
                 wallet={wallet}
-                nsfwUnlocked={nsfwUnlocked}
+                nsfwUnlocked={hold >= NSFW_HOLD}
                 unlockedMap={unlockedMap}
                 onUnlocked={(id) => setUnlockedMap((m) => ({ ...m, [id]: true }))}
+                authed={authed}
               />
             ))}
           </div>
         </section>
 
-        {/* PREVIEW (decor) */}
+        {/* PREVIEW DECOR */}
         <div className="w-full max-w-5xl mt-10 grid grid-cols-2 md:grid-cols-4 gap-4" aria-hidden="true">
           {["/sfw/s1.jpg", "/sfw/s2.jpg", "/nsfw/n1_blur.jpg", "/nsfw/n2_blur.jpg"].map((src, i) => (
             <div key={i} className="rounded-xl overflow-hidden border border-pink-300/30 bg-black/30">
@@ -435,26 +426,16 @@ export default function MeetXenia() {
           <Link href="/buy" className="px-5 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 font-semibold hover:bg-black/50">Get $CRUSH</Link>
         </div>
 
-        {/* Share on X */}
         <div className="mt-6">
           <ShareOnX
-            text={
-              mounted
-                ? hold >= CHAT_MIN_HOLD
-                  ? `I just unlocked flirty chat with Xenia on Crush AI 😘`
-                  : `I’m checking out Xenia on Crush AI 💘`
-                : "Crush AI — flirty chat on Solana 💘"
-            }
+            text={mounted ? (hold >= CHAT_MIN_HOLD ? `I just unlocked flirty chat with Xenia on Crush AI 😘` : `I’m checking out Xenia on Crush AI 💘`) : "Crush AI — flirty chat on Solana 💘"}
             url={mounted ? window.location.origin + "/meet-xenia" : "https://yourdomain.com/meet-xenia"}
             hashtags={["Solana", "AI", "Crypto"]}
             via="CrushAIx"
           />
         </div>
 
-        {/* Decorative */}
         <img src="/cupid_female.png" alt="" aria-hidden="true" className="opacity-70 mt-10 w-36" />
-
-        {/* No-JS fallback */}
         <noscript>
           <p className="text-pink-100 text-center mt-6">
             Enable JavaScript or <a href="/buy" className="underline text-pink-200">buy $CRUSH</a> to unlock.
@@ -464,9 +445,7 @@ export default function MeetXenia() {
 
       <style jsx global>{`
         .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
-        a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
-          outline: 3px solid #b5fffc !important; outline-offset: 2px; border-radius: 12px;
-        }
+        a:focus-visible, button:focus-visible { outline: 3px solid #b5fffc !important; outline-offset: 2px; border-radius: 12px; }
         .preview-pop { animation: pop-in 650ms cubic-bezier(0.22, 1, 0.36, 1); }
         @keyframes pop-in { 0% { transform: scale(0.96); opacity: 0.2; } 100% { transform: scale(1); opacity: 1; } }
         @media (prefers-reduced-motion: reduce) { .preview-pop { animation: none !important; transition: none !important; } }
@@ -475,14 +454,10 @@ export default function MeetXenia() {
   );
 }
 
-/** ===== Presentational components (unchanged) ===== */
+/** ===== Presentational components ===== */
 function TierCard({ title, desc, features = [], status = "locked", ctas = null }) {
-  const badge =
-    status === "unlocked" ? "bg-green-500 text-white" :
-    status === "soon" ? "bg-yellow-500 text-black" :
-    "bg-pink-500 text-white";
+  const badge = status === "unlocked" ? "bg-green-500 text-white" : status === "soon" ? "bg-yellow-500 text-black" : "bg-pink-500 text-white";
   const label = status === "unlocked" ? "Unlocked" : status === "soon" ? "Soon" : "Locked";
-
   return (
     <div className="rounded-2xl border border-pink-300/30 bg-black/30 p-5">
       <div className="flex items-center justify-between mb-2">
@@ -490,15 +465,13 @@ function TierCard({ title, desc, features = [], status = "locked", ctas = null }
         <span className={`px-2 py-1 rounded-full text-xs font-bold ${badge}`}>{label}</span>
       </div>
       <div className="text-pink-100/90 mb-3">{desc}</div>
-      <ul className="list-disc pl-5 text-pink-100/90 space-y-1">
-        {features.map((f, i) => <li key={i}>{f}</li>)}
-      </ul>
+      <ul className="list-disc pl-5 text-pink-100/90 space-y-1">{features.map((f, i) => <li key={i}>{f}</li>)}</ul>
       {ctas && <div className="mt-3">{ctas}</div>}
     </div>
   );
 }
 
-function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }) {
+function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, authed }) {
   const unlocked = hold >= item.minHold;
   const needed = Math.max(0, item.minHold - hold);
 
@@ -506,16 +479,18 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }
     <div className="relative rounded-2xl border border-pink-300/30 bg-black/30 p-5 overflow-hidden">
       <div className="flex items-center justify-between gap-3 mb-1">
         <h4 className="text-lg font-semibold text-white">{item.title}</h4>
-        <NeededPill unlocked={unlocked} needed={needed} minHold={item.minHold} />
+        {unlocked ? (
+          <span className="px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white">Unlocked</span>
+        ) : (
+          <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">Needs {item.minHold.toLocaleString()}</span>
+        )}
       </div>
       <div className="text-pink-100/90 mb-3">{item.blurb}</div>
 
       {item.type === "text" && (
         <div className={`rounded-xl border border-pink-300/25 ${unlocked ? "bg-white/5" : "bg-black/40"}`}>
           <ul className="p-4 list-disc pl-6 space-y-1 text-pink-50">
-            {(item.content || []).map((line, i) => (
-              <li key={i}>{unlocked ? line : blurText(line)}</li>
-            ))}
+            {(item.content || []).map((line, i) => <li key={i}>{unlocked ? line : blurText(line)}</li>)}
           </ul>
         </div>
       )}
@@ -524,12 +499,7 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }
         <div className="grid grid-cols-3 gap-2">
           {(item.images || []).map((im, i) => (
             <figure key={i} className="rounded-lg overflow-hidden border border-pink-300/25 bg-white/5">
-              <img
-                src={im.src}
-                alt={im.alt}
-                className={`w-full h-28 object-cover ${unlocked ? "" : "opacity-70 blur-sm"}`}
-                loading="lazy"
-              />
+              <img src={im.src} alt={im.alt} className={`w-full h-28 object-cover ${unlocked ? "" : "opacity-70 blur-sm"}`} loading="lazy" />
               <figcaption className="px-2 py-1 text-xs text-pink-100/90">{unlocked ? im.alt : "Locked preview"}</figcaption>
             </figure>
           ))}
@@ -539,35 +509,22 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }
       {item.type === "pay-images" && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(item.images || []).map((im) => {
-            const isFullyUnlocked = nsfwUnlocked || !!unlockedMap[im.id];
+            const fully = nsfwUnlocked || !!unlockedMap[im.id];
+            const canOpen = fully && authed; // must be authed to fetch media
             return (
               <figure key={im.id} className="rounded-lg overflow-hidden border border-pink-300/25 bg-white/5">
-                <img
-                  src={im.preview}
-                  alt={im.title}
-                  className={`w-full h-40 object-cover ${isFullyUnlocked ? "" : "opacity-70 blur-sm"}`}
-                  loading="lazy"
-                />
-                <figcaption className="px-2 py-1 text-xs text-pink-100/90">
-                  {im.title}
-                </figcaption>
-
+                <img src={im.preview} alt={im.title} className={`w-full h-40 object-cover ${fully ? "" : "opacity-70 blur-sm"}`} loading="lazy" />
+                <figcaption className="px-2 py-1 text-xs text-pink-100/90">{im.title}</figcaption>
                 <div className="p-2 flex items-center justify-between gap-2">
-                  {isFullyUnlocked ? (
-                    <a
-                      className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold w-full text-center"
-                      href={`/api/media/${encodeURIComponent(im.id)}?wallet=${encodeURIComponent(wallet)}`}
-                      target="_blank" rel="noreferrer"
-                    >
-                      View Full-Res
-                    </a>
+                  {canOpen ? (
+                    <a className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold w-full text-center"
+                       href={`/api/media/${encodeURIComponent(im.id)}`} target="_blank" rel="noreferrer">View Full-Res</a>
+                  ) : fully ? (
+                    <span className="px-3 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 text-sm text-center w-full">
+                      {authed ? "Unlocked" : "Secure Login required"}
+                    </span>
                   ) : (
-                    <PayUnlockButton
-                      wallet={wallet}
-                      itemId={im.id}
-                      price={im.priceCrush}
-                      onUnlocked={() => onUnlocked?.(im.id)}
-                    />
+                    <PayUnlockButton wallet={wallet} itemId={im.id} price={im.priceCrush} onUnlocked={() => onUnlocked?.(im.id)} />
                   )}
                 </div>
               </figure>
@@ -576,23 +533,9 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }
         </div>
       )}
 
-      {item.type === "cta" && (
-        <div className="mt-2">
-          {unlocked ? (
-            <Link href={item.ctaHref} className="px-4 py-2 inline-block rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">
-              {item.ctaLabel || "Open →"}
-            </Link>
-          ) : (
-            <div className="text-pink-100/90">Unlock to access customs and early drops.</div>
-          )}
-        </div>
-      )}
-
       {item.type !== "pay-images" && !unlocked && (
         <div className="mt-3 flex items-center justify-between">
-          <div className="text-pink-200 text-sm">
-            You need <b>{needed.toLocaleString()}</b> more $CRUSH to unlock.
-          </div>
+          <div className="text-pink-200 text-sm">You need <b>{needed.toLocaleString()}</b> more $CRUSH to unlock.</div>
           <Link href="/buy" className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">Get $CRUSH</Link>
         </div>
       )}
@@ -600,54 +543,30 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked }
   );
 }
 
+function blurText(s) { return s.replace(/[A-Za-z0-9]/g, (c, i) => (i % 3 === 0 ? c : "•")); }
 function PayUnlockButton({ wallet, itemId, price, onUnlocked }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   async function start() {
     if (!wallet) return setErr("Connect wallet first");
     setBusy(true); setErr("");
     try {
       const { url, reference } = await createPayment({ wallet, itemId });
       window.open(url, "_blank", "noopener,noreferrer");
-      const startTs = Date.now();
-      while (Date.now() - startTs < 120000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 120000) {
         await new Promise((r) => setTimeout(r, 4000));
         const v = await verifyPayment({ wallet, itemId, reference });
         if (v?.ok) { onUnlocked?.(); setBusy(false); return; }
       }
-      setErr("Payment not detected yet. Try again or hit Restore purchases later.");
-    } catch (e) {
-      setErr(e?.message || "Failed to start payment");
-    } finally {
-      setBusy(false);
-    }
+      setErr("Payment not detected yet. Try Restore later.");
+    } catch (e) { setErr(e?.message || "Payment failed"); } finally { setBusy(false); }
   }
-
   return (
     <div className="flex flex-col gap-1 w-full">
-      <button
-        onClick={start}
-        disabled={busy}
-        className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold disabled:opacity-60 w-full"
-      >
+      <button onClick={start} disabled={busy} className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold disabled:opacity-60 w-full">
         {busy ? "Waiting…" : `Unlock for ${price} $CRUSH`}
       </button>
       {err && <span className="text-pink-200 text-xs">{err}</span>}
     </div>
   );
-}
-
-function NeededPill({ unlocked, needed, minHold }) {
-  return unlocked ? (
-    <span className="px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white">Unlocked</span>
-  ) : (
-    <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">
-      Needs {minHold.toLocaleString()}
-    </span>
-  );
-}
-
-function blurText(s) {
-  return s.replace(/[A-Za-z0-9]/g, (c, i) => (i % 3 === 0 ? c : "•"));
 }
