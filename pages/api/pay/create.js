@@ -1,51 +1,72 @@
 // pages/api/pay/create.js
 export const config = { runtime: "nodejs" };
 
-import { randomBytes } from "crypto";
-import { URLSearchParams } from "url";
-import { getItem, TREASURY, CRUSH_MINT } from "../../../lib/payments";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
+import crypto from "crypto";
+import { getItem } from "../../../lib/payments";
 
-/**
- * Creates a Solana Pay URL for SPL-token transfer in $CRUSH.
- * We embed a unique memo: crush:<itemId>:<ref> and verify it later.
- */
+// ENV
+const MINT =
+  process.env.NEXT_PUBLIC_CRUSH_MINT ||
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
+// Treasury to receive $CRUSH for per-image unlocks
+const RECEIVER =
+  process.env.PAY_RECEIVER || process.env.NEXT_PUBLIC_TREASURY || "";
+
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   try {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
     const { wallet, itemId } = req.body || {};
-    if (!wallet || !itemId) return res.status(400).json({ error: "wallet & itemId required" });
-    if (!TREASURY) return res.status(500).json({ error: "TREASURY_WALLET not set" });
+    if (!wallet || String(wallet).length < 25) {
+      return res.status(400).json({ error: "wallet missing/invalid" });
+    }
+    if (!itemId) {
+      return res.status(400).json({ error: "itemId required" });
+    }
+    if (!RECEIVER) {
+      return res.status(400).json({ error: "PAY_RECEIVER not set in env" });
+    }
+    if (!MINT) {
+      return res.status(400).json({ error: "NEXT_PUBLIC_CRUSH_MINT not set" });
+    }
 
     const item = getItem(itemId);
-    if (!item) return res.status(404).json({ error: "Unknown item" });
+    if (!item?.priceCrush || item.priceCrush <= 0) {
+      return res.status(400).json({ error: "unknown item or missing price" });
+    }
 
-    // Unique reference token (just a random hex we’ll carry inside memo)
-    const ref = randomBytes(16).toString("hex");
-    const memo = `crush:${itemId}:${ref}`;
+    // Generate a reference public key (no need to persist)
+    const kp = nacl.sign.keyPair(); // 32-byte pubkey
+    const reference = bs58.encode(kp.publicKey);
 
-    // Price is in $CRUSH UI units
-    const amount = Number(item.priceCrush || 0);
-    if (!amount || amount <= 0) return res.status(400).json({ error: "Invalid price" });
-
+    // Solana Pay transfer URL
+    // Spec: solana:<recipient>?amount=...&spl-token=<mint>&reference=<ref>&label=...&message=...&memo=...
     const params = new URLSearchParams({
-      amount: String(amount),
-      "spl-token": CRUSH_MINT,
+      amount: String(item.priceCrush), // whole token units; verify uses decimals to be safe
+      "spl-token": MINT,
+      reference,
       label: "Crush AI",
-      message: `Unlock ${item.title}`,
-      memo,
+      message: `Unlock ${itemId}`,
+      memo: `crush:${itemId}`,
     });
+    const payUrl = `solana:${RECEIVER}?${params.toString()}`;
 
-    // solana:<recipient>?amount=...&spl-token=...&label=...&message=...&memo=...
-    const url = `solana:${TREASURY}?${params.toString()}`;
-
-    // Private, short caching OK
-    res.setHeader("Cache-Control", "private, max-age=30, stale-while-revalidate=120");
-    return res.status(200).json({ url, reference: ref });
+    // Return to client
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({
+      ok: true,
+      url: payUrl,
+      reference,
+      receiver: RECEIVER,
+      mint: MINT,
+    });
   } catch (e) {
-    return res.status(500).json({ error: "failed", message: String(e?.message || e) });
+    // Never leak stack in prod
+    return res.status(500).json({ error: "internal_error" });
   }
 }

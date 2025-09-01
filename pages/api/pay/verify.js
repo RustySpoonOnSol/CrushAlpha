@@ -1,74 +1,36 @@
 // pages/api/pay/verify.js
 export const config = { runtime: "nodejs" };
 
-import { getItem, TREASURY, CRUSH_MINT } from "../../../lib/payments";
+import { getItem } from "../../../lib/payments";
 import { grantEntitlement } from "../../../lib/entitlements";
 
-const HELIUS = process.env.HELIUS_API_KEY || "";
+const HELIUS_KEY = process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_KEY || "";
+
 const RPCS = [
   process.env.SOLANA_RPC_PRIMARY,
   process.env.SOLANA_RPC_FALLBACK,
   process.env.NEXT_PUBLIC_SOLANA_RPC,
-  HELIUS ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS}` : "",
+  HELIUS_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "",
   "https://api.mainnet-beta.solana.com",
 ].filter(Boolean);
 
-const TIMEOUT_MS = 8_000;
+// ENV
+const MINT =
+  process.env.NEXT_PUBLIC_CRUSH_MINT ||
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
+const RECEIVER =
+  process.env.PAY_RECEIVER || process.env.NEXT_PUBLIC_TREASURY || "";
+
+const TIMEOUT_MS = 9_000;
 const withTimeout = (p, ms = TIMEOUT_MS) =>
   Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 
-export default async function handler(req, res) {
-  try {
-    const wallet = String(req.query.wallet || "").trim();
-    const itemId = String(req.query.itemId || "").trim();
-    const reference = String(req.query.reference || "").trim();
-
-    if (!wallet || wallet.length < 25) return res.status(400).json({ ok: false, reason: "bad-wallet" });
-    if (!itemId || !reference) return res.status(400).json({ ok: false, reason: "missing" });
-
-    const item = getItem(itemId);
-    if (!item) return res.status(404).json({ ok: false, reason: "unknown-item" });
-
-    const memoTarget = `crush:${itemId}:${reference}`;
-
-    // 1) Scan recent signatures for the treasury (fast path)
-    const sig = await findSigWithMemoForTreasury(memoTarget);
-    if (!sig) {
-      res.setHeader("Cache-Control", "private, max-age=5");
-      return res.status(200).json({ ok: false, pending: true });
-    }
-
-    // 2) Fetch tx, validate SPL-token transfer of CRUSH amount to TREASURY involving wallet
-    const tx = await getTx(sig);
-    const valid = validateCrushTransfer(tx, {
-      wallet,
-      treasury: TREASURY,
-      mint: CRUSH_MINT,
-      amount: Number(item.priceCrush || 0),
-      memo: memoTarget,
-    });
-
-    if (!valid) {
-      res.setHeader("Cache-Control", "private, max-age=5");
-      return res.status(200).json({ ok: false, pending: true });
-    }
-
-    // 3) Record entitlement
-    await grantEntitlement(wallet, itemId, sig);
-
-    res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json({ ok: true, signature: sig });
-  } catch (e) {
-    return res.status(200).json({ ok: false, error: String(e?.message || e) });
-  }
-}
-
 async function rpc(method, params) {
-  const payload = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
   for (const url of RPCS) {
     try {
       const r = await withTimeout(
-        fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: payload }),
+        fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body }),
         TIMEOUT_MS
       );
       const j = await r.json();
@@ -78,73 +40,126 @@ async function rpc(method, params) {
   return null;
 }
 
-async function findSigWithMemoForTreasury(memoTarget) {
-  // Check the last N signatures on the treasury account and inspect memos.
-  const N = 100;
-  const sigs = await rpc("getSignaturesForAddress", [TREASURY, { limit: N }]);
-  if (!Array.isArray(sigs)) return null;
-  for (const s of sigs) {
-    const tx = await getTx(s.signature);
-    const memos = extractMemos(tx);
-    if (memos.some((m) => m === memoTarget)) return s.signature;
-  }
-  return null;
-}
-
-async function getTx(signature) {
-  return await rpc("getTransaction", [
-    signature,
-    { maxSupportedTransactionVersion: 0, commitment: "confirmed" },
-  ]);
-}
-
-function extractMemos(tx) {
+export default async function handler(req, res) {
   try {
-    const inst = tx?.transaction?.message?.instructions || [];
-    const out = [];
-    for (const ix of inst) {
-      const pid = ix?.program || ix?.programId;
-      if (
-        pid === "spl-memo" ||
-        pid === "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" ||
-        pid === "Memo111111111111111111111111111111111111111"
-      ) {
-        const dataB64 = ix?.data;
-        if (!dataB64) continue;
-        const str = Buffer.from(dataB64, "base64").toString("utf-8");
-        if (str) out.push(str);
-      }
+    const { wallet, itemId, reference } = req.query;
+    if (!wallet || String(wallet).length < 25) {
+      return res.status(400).json({ ok: false, error: "wallet missing/invalid" });
     }
-    return out;
-  } catch {
-    return [];
-  }
-}
+    if (!itemId || !reference) {
+      return res.status(400).json({ ok: false, error: "itemId and reference required" });
+    }
+    if (!RECEIVER) {
+      return res.status(400).json({ ok: false, error: "PAY_RECEIVER not set" });
+    }
 
-function validateCrushTransfer(tx, { wallet, treasury, mint, amount, memo }) {
-  try {
-    if (!tx?.meta) return false;
+    const item = getItem(itemId);
+    if (!item?.priceCrush || item.priceCrush <= 0) {
+      return res.status(400).json({ ok: false, error: "unknown item or missing price" });
+    }
 
-    // Ensure memo is present (double-check)
-    const memos = extractMemos(tx);
-    if (!memos.some((m) => m === memo)) return false;
+    // 1) Find signatures that include the reference account
+    // Using getSignaturesForAddress(reference)
+    const sigs = await rpc("getSignaturesForAddress", [
+      reference,
+      { limit: 20 }, // small window; client polls for up to ~2 min
+    ]);
 
-    // Verify $CRUSH credited to treasury
-    const pre = tx.meta.preTokenBalances || [];
-    const post = tx.meta.postTokenBalances || [];
-    const preTr = pre.find((b) => b.mint === mint && b.owner === treasury);
-    const postTr = post.find((b) => b.mint === mint && b.owner === treasury);
-    const preAmt = Number(preTr?.uiTokenAmount?.uiAmount || 0);
-    const postAmt = Number(postTr?.uiTokenAmount?.uiAmount || 0);
-    const delta = postAmt - preAmt;
-    if (delta + 1e-9 < Number(amount || 0)) return false;
+    if (!Array.isArray(sigs) || sigs.length === 0) {
+      return res.status(200).json({ ok: false, reason: "no-sigs" });
+    }
 
-    // Ensure user wallet participated
-    const acctKeys = tx?.transaction?.message?.accountKeys?.map((k) => k?.pubkey || k) || [];
-    if (!acctKeys.includes(wallet)) return false;
+    // 2) Fetch transactions and look for an SPL transfer of the mint to RECEIVER
+    const txs = await rpc("getTransactions", [
+      sigs.map((s) => s.signature),
+      { maxSupportedTransactionVersion: 0 },
+    ]);
 
-    return true;
-  } catch {
-    return false;
+    // Fetch decimals to compare amounts safely
+    const supply = await rpc("getTokenSupply", [MINT]);
+    const decimals = Number(supply?.value?.decimals ?? 6); // usually 6/9
+    const wantRaw = BigInt(Math.round(item.priceCrush * 10 ** decimals));
+
+    let matchedSig = null;
+
+    for (const tx of txs || []) {
+      try {
+        const meta = tx?.meta;
+        const msg = tx?.transaction?.message;
+        if (!meta || !msg) continue;
+
+        // Quick receiver presence check
+        const keys = (msg.accountKeys || []).map((k) => (typeof k === "string" ? k : k?.pubkey) || "").filter(Boolean);
+        if (!keys.includes(RECEIVER)) continue;
+
+        // Check parsed inner instructions for a token transfer of the right mint to RECEIVER
+        const ii = meta?.innerInstructions || [];
+        let got = false;
+
+        for (const group of ii) {
+          for (const ins of group?.instructions || []) {
+            const parsed = ins?.parsed;
+            if (!parsed) continue;
+
+            // Token program transferChecked/transfer
+            if (parsed.type === "transferChecked" || parsed.type === "transfer") {
+              const info = parsed.info || {};
+              const mint = info.mint || info.mintAddr;
+              if (mint !== MINT) continue;
+
+              const dest = info.destination || info.destinationOwner || info.destinationPubkey || info.dest;
+              if (!dest) continue;
+
+              // We want destination OWNER == RECEIVER (final receiver's ATA owner)
+              const postTokenBalances = meta.postTokenBalances || [];
+              const match = postTokenBalances.find(
+                (b) =>
+                  (b?.owner === RECEIVER || b?.uiTokenAmount?.owner === RECEIVER) &&
+                  b?.mint === MINT
+              );
+              if (!match) continue;
+
+              // Amount: compare raw if available, else ui + decimals
+              let amtRaw = null;
+              if (info.tokenAmount?.amount) {
+                amtRaw = BigInt(info.tokenAmount.amount);
+              } else if (info.amount) {
+                // amount may be ui; coerce
+                const ui = Number(info.amount);
+                if (Number.isFinite(ui)) amtRaw = BigInt(Math.round(ui * 10 ** decimals));
+              }
+              if (amtRaw === null) continue;
+
+              if (amtRaw >= wantRaw) {
+                // Also ensure payer/sender address matches wallet (to avoid someone else’s tx)
+                const acctMatch = keys.includes(wallet);
+                if (acctMatch) {
+                  matchedSig = tx?.transaction?.signatures?.[0] || null;
+                  got = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (got) break;
+        }
+
+        if (got && matchedSig) break;
+      } catch {}
+    }
+
+    if (!matchedSig) {
+      return res.status(200).json({ ok: false, reason: "no-match" });
+    }
+
+    // 3) Grant entitlement for this wallet+item
+    try {
+      await grantEntitlement(wallet, itemId, { signature: matchedSig });
+    } catch {}
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ ok: true, signature: matchedSig });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "internal_error" });
   }
 }
