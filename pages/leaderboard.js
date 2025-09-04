@@ -506,7 +506,7 @@ export default function LeaderboardPage(){
               disabled={!myIdentifier}
               aria-invalid={availState==="invalid"||availState==="taken"}
             />
-            <button className="btn btn-primary" onClick={saveName} disabled={disableSave}>
+            <button className="cbtn cbtn-primary" onClick={saveName} disabled={disableSave}>
               {nameSaving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -516,15 +516,15 @@ export default function LeaderboardPage(){
         <div className="ns-right">
           <div className="share-title">Share your rank</div>
           <div className="share-group" role="group" aria-label="Share actions">
-            <button className="btn btn-x" onClick={shareToX} disabled={!me || !shareUrl}>
+            <button className="cbtn cbtn-x" onClick={shareToX} disabled={!me || !shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
               <span>Share to X</span>
             </button>
-            <button className="btn btn-ghost" onClick={copyShare} disabled={!shareUrl}>
+            <button className="cbtn cbtn-ghost" onClick={copyShare} disabled={!shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span>Copy link</span>
             </button>
-            <button className="btn btn-outline" onClick={openShare} disabled={!shareUrl}>
+            <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
               <span>Open card</span>
             </button>
@@ -725,54 +725,57 @@ export default function LeaderboardPage(){
         .share-group{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
 
         /* ===========================
-           Button system — HARD reset
+           Crush Buttons (no collisions)
            =========================== */
-        .btn{
+        .cbtn{
           all: unset;
           box-sizing: border-box;
 
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
 
-          padding: 12px 16px;
-          min-height: 40px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,.24);
+          padding:12px 16px;
+          min-height:40px;
+          border-radius:999px;
+          border:1px solid rgba(255,255,255,.24);
 
           font: inherit;
-          font-weight: 1000;
-          letter-spacing: .2px;
-          line-height: 1;
-          color: #fff;
+          font-weight:1000;
+          letter-spacing:.2px;
+          line-height:1;
+          color:#fff;
 
-          background: rgba(255,255,255,.10);
-          cursor: pointer;
-          user-select: none;
-          text-decoration: none;
+          background:rgba(255,255,255,.10);
+          cursor:pointer;
+          user-select:none;
+          text-decoration:none;
+          white-space:nowrap;
 
-          transition: transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease;
+          transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease;
         }
-        .btn:hover:not(:disabled){ transform: translateY(-1px); box-shadow: 0 10px 24px rgba(0,0,0,.25); }
-        .btn:active:not(:disabled){ transform: translateY(0); }
-        .btn:disabled{ opacity: .55; cursor: not-allowed; }
+        .cbtn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.25); }
+        .cbtn:active:not(:disabled){ transform:translateY(0); }
+        .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
 
         /* Variants */
-        .btn-primary{
-          background: linear-gradient(90deg,#fa1a81,#b57eff);
-          border-color: rgba(255,255,255,.28);
-          box-shadow: 0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28);
+        .cbtn-primary{
+          background:linear-gradient(90deg,#fa1a81,#b57eff);
+          border-color:rgba(255,255,255,.28);
+          box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28);
         }
-        .btn-primary:hover:not(:disabled){
-          box-shadow: 0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45);
+        .cbtn-primary:hover:not(:disabled){
+          box-shadow:0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45);
         }
-        .btn-x{
-          background: radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%);
-          border-color: rgba(255,255,255,.22);
+        .cbtn-x{
+          background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%);
+          border-color:rgba(255,255,255,.22);
         }
-        .btn-ghost{ background: rgba(255,255,255,.12); }
-        .btn-outline{ background: transparent; border-color: rgba(255,255,255,.35); }
+        .cbtn-ghost{ background:rgba(255,255,255,.12); }
+        .cbtn-outline{ background:transparent; border-color:rgba(255,255,255,.35); }
+
+        .ns-inputrow .cbtn{ margin-left:2px; }
 
         /* Icons inside buttons */
         .ic{ display:inline-block; width:16px; height:16px; opacity:.92; }
@@ -816,7 +819,7 @@ export default function LeaderboardPage(){
         @media (max-width:380px){
           .lb-card{ padding:10px; }
           .lb-row{ padding:10px 10px; }
-          .btn{ padding:10px 14px; }
+          .cbtn{ padding:10px 14px; }
           .ns-card{ padding:12px; }
           .ns-input{ padding:10px 14px; }
         }
