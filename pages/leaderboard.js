@@ -440,7 +440,7 @@ export default function LeaderboardPage(){
     );
   }
 
-  /* ---------- Combined Name + Share UI ---------- */
+  /* ---------- Combined Name + Share UI (polished) ---------- */
   function NameEditor(){
     const statusBadge =
       availState==="checking" ? <span className="chip info">Checking…</span> :
@@ -457,9 +457,9 @@ export default function LeaderboardPage(){
 
     const me = allFlirts.find(r => r.wallet === (myWallet || guestId));
     const total = allFlirts.length;
-    const percentile = me ? formatPercentile(me._rank, total) : "—";
+    const myPercentile = me ? formatPercentile(me._rank, total) : "—";
 
-    // ====== NEW: Share page URL (/u/{name-or-wallet}) ======
+    // Share URL → /u/{name-or-wallet}
     const base =
       (process.env.NEXT_PUBLIC_SITE_URL ||
         (typeof window !== "undefined" && window.location?.origin) ||
@@ -489,13 +489,11 @@ export default function LeaderboardPage(){
       const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`;
       window.open(intent, "_blank", "noopener,noreferrer");
     };
-    // ====== /NEW ======
 
     return (
       <div className="ns-card" role="group" aria-label="Claim name and share">
         <div className="ns-left">
-          <div className="ns-label">Claim your name</div>
-
+          <div className="ns-title">Claim your name</div>
           <div className="ns-inputrow">
             <input
               ref={inputRef}
@@ -511,48 +509,35 @@ export default function LeaderboardPage(){
               disabled={!myIdentifier}
               aria-invalid={availState==="invalid"||availState==="taken"}
             />
-            <button className="ns-save" onClick={saveName} disabled={disableSave}>
+            <button className="btn btn-primary btn-pill" onClick={saveName} disabled={disableSave}>
               {nameSaving ? "Saving…" : "Save"}
             </button>
           </div>
-
           <div className="ns-hint" aria-live="polite">{statusBadge}</div>
         </div>
 
         <div className="ns-right">
-          <button
-            className="share-btn"
-            onClick={shareToX}
-            aria-label="Share to X"
-            title="Shares your rank + XP"
-            disabled={!me || !shareUrl}
-          >
-            Share to X
-          </button>
-          <button
-            className="share-btn"
-            onClick={copyShare}
-            aria-label="Copy share link"
-            title="Copy /u link"
-            disabled={!shareUrl}
-          >
-            Copy Share Link
-          </button>
-          <button
-            className="share-btn"
-            onClick={openShare}
-            aria-label="Open share card"
-            title="Open your /u card"
-            disabled={!shareUrl}
-          >
-            Open Share Card
-          </button>
+          <div className="share-title">Share your rank</div>
+          <div className="share-group" role="group" aria-label="Share actions">
+            <button className="btn btn-x btn-pill" onClick={shareToX} disabled={!me || !shareUrl}>
+              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
+              Share to X
+            </button>
+            <button className="btn btn-ghost btn-pill" onClick={copyShare} disabled={!shareUrl}>
+              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+              Copy link
+            </button>
+            <button className="btn btn-outline btn-pill" onClick={openShare} disabled={!shareUrl}>
+              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
+              Open card
+            </button>
+          </div>
 
           {me ? (
             <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
               <span className="hrl-label">Flirt rank</span>{" "}
               <span className="hrl-badge">#{me._rank}</span>{" "}
-              <span className="hrl-sub">Top {percentile}%</span>
+              <span className="hrl-sub">Top {myPercentile}%</span>
             </div>
           ) : null}
         </div>
@@ -699,7 +684,7 @@ export default function LeaderboardPage(){
           backdrop-filter:blur(10px) saturate(1.1);
           color:#ffe9f6; white-space:nowrap;
         }
-        .hrl.small{ padding:8px 12px; gap:10px; }
+        .hrl.small{ padding:8px 12px; gap:10px; align-self:flex-start; }
         .hrl-label{ font-weight:900; letter-spacing:.2px; opacity:.95; }
         .hrl-badge{
           padding:5px 12px; border-radius:999px; font-weight:1000; font-size:1.02rem; line-height:1;
@@ -711,48 +696,66 @@ export default function LeaderboardPage(){
         .hrl-cur{ margin-left:6px; font-weight:900; opacity:.9; }
         .hrl-sub{ font-weight:900; opacity:.88; }
 
-        /* New Name + Share card */
+        /* --- Name & Share card (polished) --- */
         .ns-card{
-          display:flex; align-items:flex-start; justify-content:space-between;
-          gap:18px; margin:8px 6px 18px; padding:16px;
-          border-radius:18px; background:rgba(255,255,255,0.07);
-          border:1px solid rgba(255,255,255,0.16); backdrop-filter:blur(6px);
+          display:grid; grid-template-columns: 1fr auto; gap:22px;
+          margin:8px 6px 18px; padding:16px 18px;
+          border-radius:20px;
+          background:rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,.16);
+          backdrop-filter: blur(8px) saturate(1.1);
         }
-        .ns-left{ flex:1 1 520px; min-width:280px; }
-        .ns-right{ flex:0 0 auto; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+        @media (max-width:860px){ .ns-card{ grid-template-columns: 1fr; } }
 
-        .ns-label{ font-weight:900; color:#fff; margin:0 0 8px 2px; }
-        .ns-inputrow{ display:flex; gap:10px; align-items:center; }
+        .ns-left{ min-width: 280px; }
+        .ns-title{ font-weight:1000; color:#fff; margin:4px 0 10px 2px; letter-spacing:.2px; }
+
+        .ns-inputrow{ display:flex; gap:12px; align-items:center; }
         .ns-input{
           flex:1 1 auto; min-width:220px;
           background:#fff; color:#000; border:1px solid rgba(0,0,0,.18);
-          border-radius:999px; padding:12px 16px; font-weight:700; line-height:1.25;
+          border-radius:14px; padding:12px 14px; font-weight:700; line-height:1.2;
           box-shadow:0 1px 0 rgba(0,0,0,.04), inset 0 6px 18px rgba(0,0,0,.08);
         }
         .ns-input.available{ box-shadow:0 0 0 3px #4ade8033, inset 0 6px 18px rgba(0,0,0,.08); }
         .ns-input.taken{ box-shadow:0 0 0 3px #fb718533, inset 0 6px 18px rgba(0,0,0,.08); }
         .ns-input.invalid{ box-shadow:0 0 0 3px #fbbf2433, inset 0 6px 18px rgba(0,0,0,.08); }
-
-        .ns-save{
-          padding:12px 20px; border-radius:999px;
-          background:linear-gradient(90deg,#fa1a81,#b57eff); color:#fff;
-          font-weight:1000; border:1px solid rgba(255,255,255,.24); cursor:pointer;
-          box-shadow:0 0 16px rgba(250,26,129,0.46), 0 14px 28px rgba(250,26,129,0.3);
-          transition:.15s ease; white-space:nowrap;
-        }
-        .ns-save:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 16px 34px rgba(250,26,129,0.55), 0 0 22px rgba(181,126,255,0.45); }
-        .ns-save:disabled{ opacity:.6; cursor:not-allowed; }
-
         .ns-hint{ margin-top:8px; font-weight:900; }
 
-        .share-btn{
+        .ns-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
+        @media (max-width:860px){ .ns-right{ align-items:flex-start; } }
+        .share-title{ font-weight:900; color:#fff; opacity:.95; margin:2px 0 2px; }
+        .share-group{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+
+        /* Button system */
+        .btn{
           display:inline-flex; align-items:center; gap:8px;
-          padding:12px 18px; border-radius:999px;
+          padding:12px 16px; border-radius:12px; font-weight:1000;
           border:1px solid rgba(255,255,255,.24);
-          background:linear-gradient(90deg,#fa1a81,#b57eff);
-          color:#fff; font-weight:1000; cursor:pointer;
+          color:#fff; background: rgba(255,255,255,.10);
+          transition:transform .12s ease, box-shadow .2s ease, background .2s ease;
+          white-space:nowrap;
         }
-        .share-btn:disabled{ opacity:.6; cursor:not-allowed; }
+        .btn:hover:not(:disabled){ transform: translateY(-1px); box-shadow: 0 10px 24px rgba(0,0,0,.25); }
+        .btn:disabled{ opacity:.6; cursor:not-allowed; }
+        .btn-pill{ border-radius:999px; }
+
+        /* Variants */
+        .btn-primary{
+          background: linear-gradient(90deg,#fa1a81,#b57eff);
+          box-shadow: 0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28);
+        }
+        .btn-primary:hover:not(:disabled){
+          box-shadow: 0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45);
+        }
+        .btn-x{
+          background: radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%);
+          border-color: rgba(255,255,255,.22);
+        }
+        .btn-ghost{ background: rgba(255,255,255,.10); }
+        .btn-outline{ background: transparent; border-color: rgba(255,255,255,.35); }
+
+        .ic{ display:block; opacity:.92; }
 
         /* Table + rows */
         .lb-card{
@@ -790,14 +793,10 @@ export default function LeaderboardPage(){
         @keyframes shine{ to{ transform:translateX(120%) } }
 
         /* Mobile micro-polish */
-        @media (max-width:860px){
-          .ns-card{ flex-direction:column; align-items:stretch; }
-          .ns-right{ justify-content:flex-start; }
-        }
         @media (max-width:380px){
           .lb-card{ padding:10px; }
           .lb-row{ padding:10px 10px; }
-          .share-btn{ padding:10px 14px; }
+          .btn{ padding:10px 14px; }
           .ns-card{ padding:12px; }
           .ns-input{ padding:10px 14px; }
         }
