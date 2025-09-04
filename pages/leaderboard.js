@@ -463,6 +463,19 @@ export default function LeaderboardPage(){
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
+    // --- NEW: open X banner (1500x500) with stats overlaid
+    const bannerParams = new URLSearchParams({
+      name: (me?.name || shareId || "Anonymous"),
+      xp: String(me?.xp || 0),
+      rank: String(me?._rank || ""),
+      pct: `Top ${myPercentile}%`,
+    });
+    const openBanner = () => {
+      if (!shareId) return;
+      const path = `/api/x-banner/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
+      window.open(path, "_blank", "noopener,noreferrer");
+    };
+
     const copyShare = async () => {
       if(!shareUrl) return;
       try { await navigator.clipboard.writeText(shareUrl); addToast("Share link copied"); }
@@ -529,8 +542,9 @@ export default function LeaderboardPage(){
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span className="lbl">Copy link</span>
             </button>
-            <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl} title="Open your share card">
-              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
+            {/* CHANGED: Open the X banner generator instead of the profile */}
+            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareUrl} title="Open X banner">
+              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v12H4zM8 4h8v4H8zM9 10h6v6H9z"/></svg>
               <span className="lbl">Open card</span>
             </button>
             <button className="cbtn cbtn-ghost" onClick={shareNative} disabled={!shareUrl} title="Share via device">
