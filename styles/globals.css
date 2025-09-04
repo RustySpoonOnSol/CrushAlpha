@@ -835,6 +835,49 @@ input[type="text"], input[type="text"]::placeholder {
 @media (prefers-reduced-motion: reduce){
   * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+/* === CRUSH: lock the share bar layout & sizes (avoid framework/global overrides) === */
+.ns-card .share-group {
+  display: flex !important;
+  align-items: center !important;
+  column-gap: 16px !important;
+  row-gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.ns-card .share-group .cbtn,
+.ns-card .share-group button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+
+  padding: 12px 16px !important;
+  min-height: 40px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255,255,255,.24) !important;
+  background: rgba(255,255,255,.12) !important;
+
+  color: #fff !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  text-decoration: none !important;
+}
+
+.ns-card .share-group .cbtn svg,
+.ns-card .share-group button svg {
+  width: 18px !important;
+  height: 18px !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+  flex: 0 0 18px !important;
+}
+
+.ns-card .share-group .cbtn span,
+.ns-card .share-group button span {
+  display: inline !important;
+  line-height: 1 !important;
+}
 
 
 
