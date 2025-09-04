@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
 import { useWallet } from "@solana/wallet-adapter-react";
 
-/* ---------- ENV / RPC (holders uses Helius when present) ---------- */
+/* ---------- ENV / RPC ---------- */
 const CRUSH_MINT = (process.env.NEXT_PUBLIC_CRUSH_MINT || "").replace(/:$/, "");
 const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY;
 const HELIUS_RPC_URL = HELIUS_API_KEY
@@ -101,6 +101,7 @@ export default function LeaderboardPage(){
   async function fetchTopHolders(){
     try{
       setHoldersLoading(true);
+      // Prefer server API
       if (CRUSH_MINT) {
         try {
           const r = await fetch(`/api/holders/top?mint=${encodeURIComponent(CRUSH_MINT)}&limit=25`);
@@ -112,6 +113,7 @@ export default function LeaderboardPage(){
           }
         } catch(_) {}
       }
+      // Fallback to Helius if configured
       if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
         setHolders([]); setAllHolders([]); return;
       }
@@ -175,10 +177,6 @@ export default function LeaderboardPage(){
     };
   }, []);
 
-  function combineSelfRowsStrict(rows){
-    return rows.slice().sort((a,b)=>(Number(b.xp)||0)-(Number(a.xp)||0));
-  }
-
   async function fetchTopFlirts(){
     try{
       setFlirtsLoading(true);
@@ -215,6 +213,7 @@ export default function LeaderboardPage(){
         rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
       }
 
+      // shine when xp goes up
       rows.forEach(r => {
         const prev = prevXp.current.get(r.wallet) || 0;
         if ((r.xp || 0) > prev) {
@@ -399,7 +398,6 @@ export default function LeaderboardPage(){
     const idx = allHolders.findIndex(h => h.wallet === myWallet);
     if(idx < 0) return null;
     const entry = allHolders[idx];
-
     const prevIdx = prevHolderRankRef.current;
     const delta = typeof prevIdx==="number" ? (prevIdx - idx) : 0;
     prevHolderRankRef.current = idx;
@@ -420,7 +418,7 @@ export default function LeaderboardPage(){
     );
   }
 
-  /* ---------- Combined Name + Share UI (polished) ---------- */
+  /* ---------- Combined Name + Share UI ---------- */
   function NameEditor(){
     const statusBadge =
       availState==="checking" ? <span className="chip info">Checking…</span> :
@@ -500,15 +498,15 @@ export default function LeaderboardPage(){
           <div className="share-group" role="group" aria-label="Share actions">
             <button className="cbtn cbtn-x" onClick={shareToX} disabled={!me || !shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
-              <span>Share to X</span>
+              <span className="lbl">Share to X</span>
             </button>
             <button className="cbtn cbtn-ghost" onClick={copyShare} disabled={!shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
-              <span>Copy link</span>
+              <span className="lbl">Copy link</span>
             </button>
             <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl}>
               <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
-              <span>Open card</span>
+              <span className="lbl">Open card</span>
             </button>
           </div>
 
@@ -525,10 +523,7 @@ export default function LeaderboardPage(){
   }
 
   async function copyWallet(text){
-    try{
-      await navigator.clipboard.writeText(text);
-      addToast("Copied");
-    }catch{}
+    try{ await navigator.clipboard.writeText(text); addToast("Copied"); }catch{}
   }
 
   return (
@@ -573,10 +568,7 @@ export default function LeaderboardPage(){
 
         <section className="lb-section">
           <h2>Top Flirts</h2>
-
-          {/* Name + Share */}
           <NameEditor />
-
           <div className="lb-card">
             <div className="lb-table" role="table" aria-label="Top Flirts">
               <div className="lb-row lb-head" role="row">
@@ -593,11 +585,7 @@ export default function LeaderboardPage(){
                 const me=myIdentifier && r.wallet===myIdentifier;
                 return (
                   <div key={r.wallet+String(r._rank)} role="row"
-                       className={[
-                         "lb-row",
-                         me?"lb-me":"",
-                         r._delta ? "rank-change" : ""
-                       ].join(" ")}>
+                       className={["lb-row", me?"lb-me":"", r._delta ? "rank-change" : ""].join(" ")}>
                     <div className="lb-td w-10">
                       {r._rank}
                       {r._delta ? (
@@ -625,7 +613,6 @@ export default function LeaderboardPage(){
         </section>
       </div>
 
-      {/* Toasts */}
       <div className="toasts" aria-live="polite">
         {toasts.map(t=>(
           <div key={t.id} className="toast">{t.text}</div>
@@ -637,64 +624,37 @@ export default function LeaderboardPage(){
           --glow-cyan:#b5fffc; --glow-pink:#ffb6d5;
           --ink-100:#06121a; --panel:rgba(25, 5, 35, 0.58);
         }
-        .lb-container{
-          width:100%;
-          max-width:1180px;
-          margin:40px auto 56px;
-          padding:0 20px;
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap:40px;
-        }
+        .lb-container{ width:100%; max-width:1180px; margin:40px auto 56px; padding:0 20px;
+          display:grid; grid-template-columns: 1fr 1fr; gap:40px; }
         @media (max-width:1024px){ .lb-container{ grid-template-columns:1fr; gap:32px; } }
-        .lb-section h2{
-          margin:0 0 18px 6px;
-          font-size:1.35rem; line-height:1.2; font-weight:900;
-          color:#fff0fc; text-shadow:0 0 8px #fa1a81, 0 0 18px #ffb6d5;
-        }
+        .lb-section h2{ margin:0 0 18px 6px; font-size:1.35rem; line-height:1.2; font-weight:900;
+          color:#fff0fc; text-shadow:0 0 8px #fa1a81, 0 0 18px #ffb6d5; }
 
         /* Rank pill */
-        .hrl, .holders-rank-line{
-          display:inline-flex; align-items:baseline; gap:12px;
-          padding:10px 14px; border-radius:999px;
+        .hrl,.holders-rank-line{ display:inline-flex; align-items:baseline; gap:12px; padding:10px 14px; border-radius:999px;
           background:linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,.07));
-          border:1.6px solid rgba(181,255,252,.6);
-          box-shadow:0 0 26px rgba(181,255,252,.25), inset 0 0 12px rgba(181,255,252,.18);
-          backdrop-filter:blur(10px) saturate(1.1);
-          color:#ffe9f6; white-space:nowrap;
-        }
+          border:1.6px solid rgba(181,255,252,.6); box-shadow:0 0 26px rgba(181,255,252,.25), inset 0 0 12px rgba(181,255,252,.18);
+          backdrop-filter:blur(10px) saturate(1.1); color:#ffe9f6; white-space:nowrap; }
         .hrl.small{ padding:8px 12px; gap:10px; align-self:flex-start; }
         .hrl-label{ font-weight:900; letter-spacing:.2px; opacity:.95; }
-        .hrl-badge{
-          padding:5px 12px; border-radius:999px; font-weight:1000; font-size:1.02rem; line-height:1;
+        .hrl-badge{ padding:5px 12px; border-radius:999px; font-weight:1000; font-size:1.02rem; line-height:1;
           color:#06121a; background:radial-gradient(120% 140% at 50% -20%, var(--glow-cyan) 0%, #e098f8 65%, rgba(224,152,248,.25) 100%);
-          border:1.6px solid rgba(181,255,252,.9);
-        }
+          border:1.6px solid rgba(181,255,252,.9); }
         .hrl.small .hrl-badge{ padding:4px 10px; font-size:.98rem; }
         .hrl-amt{ font-weight:1000; letter-spacing:.2px; opacity:.98; }
         .hrl-cur{ margin-left:6px; font-weight:900; opacity:.9; }
         .hrl-sub{ font-weight:900; opacity:.88; }
 
         /* Name & Share card */
-        .ns-card{
-          display:grid; grid-template-columns: 1fr auto; gap:22px;
-          margin:8px 6px 18px; padding:16px 18px;
-          border-radius:20px;
-          background:rgba(255,255,255,0.08);
-          border:1px solid rgba(255,255,255,.16);
-          backdrop-filter: blur(8px) saturate(1.1);
-        }
+        .ns-card{ display:grid; grid-template-columns: 1fr auto; gap:22px; margin:8px 6px 18px; padding:16px 18px;
+          border-radius:20px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,.16); backdrop-filter: blur(8px) saturate(1.1); }
         @media (max-width:860px){ .ns-card{ grid-template-columns: 1fr; } }
-
-        .ns-left{ min-width: 280px; }
+        .ns-left{ min-width:280px; }
         .ns-title{ font-weight:1000; color:#fff; margin:4px 0 10px 2px; letter-spacing:.2px; }
         .ns-inputrow{ display:flex; gap:12px; align-items:center; }
-        .ns-input{
-          flex:1 1 auto; min-width:220px;
-          background:#fff; color:#000; border:1px solid rgba(0,0,0,.18);
+        .ns-input{ flex:1 1 auto; min-width:220px; background:#fff; color:#000; border:1px solid rgba(0,0,0,.18);
           border-radius:14px; padding:12px 14px; font-weight:700; line-height:1.2;
-          box-shadow:0 1px 0 rgba(0,0,0,.04), inset 0 6px 18px rgba(0,0,0,.08);
-        }
+          box-shadow:0 1px 0 rgba(0,0,0,.04), inset 0 6px 18px rgba(0,0,0,.08); }
         .ns-input.available{ box-shadow:0 0 0 3px #4ade8033, inset 0 6px 18px rgba(0,0,0,.08); }
         .ns-input.taken{ box-shadow:0 0 0 3px #fb718533, inset 0 6px 18px rgba(0,0,0,.08); }
         .ns-input.invalid{ box-shadow:0 0 0 3px #fbbf2433, inset 0 6px 18px rgba(0,0,0,.08); }
@@ -704,80 +664,61 @@ export default function LeaderboardPage(){
         @media (max-width:860px){ .ns-right{ align-items:flex-start; } }
         .share-title{ font-weight:900; color:#fff; opacity:.95; margin:2px 0 2px; }
 
-        /* Share group layout */
-        .share-group{
-          display:flex;
-          flex-wrap:wrap;
-          align-items:center;
-          gap:14px;              /* EVEN spacing between buttons */
-        }
+        /* Share group — even spacing */
+        .share-group{ display:flex; flex-wrap:wrap; align-items:center; column-gap:16px; row-gap:10px; }
 
-        /* Crush Buttons (no collisions) */
+        /* Crush Buttons (collision-proof) */
         .cbtn{
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          gap:10px;
+          display:inline-flex !important;
+          flex-direction:row !important;
+          align-items:center !important;
+          justify-content:center !important;
+          gap:10px !important;
 
-          padding:12px 16px;
-          min-height:40px;
-          border-radius:999px;
-          border:1px solid rgba(255,255,255,.24);
+          padding:12px 16px !important;
+          min-height:40px !important;
+          border-radius:999px !important;
+          border:1px solid rgba(255,255,255,.24) !important;
 
-          font: inherit;
-          font-weight:1000;
-          letter-spacing:.2px;
-          line-height:1;
-          color:#fff;
+          font: inherit !important;
+          font-weight:1000 !important;
+          letter-spacing:.2px !important;
+          line-height:1 !important;
+          color:#fff !important;
+          font-size:0.96rem !important;
 
-          background:rgba(255,255,255,.12);
-          cursor:pointer;
-          user-select:none;
-          text-decoration:none;
-          white-space:nowrap;
-          vertical-align:middle;
+          background:rgba(255,255,255,.12) !important;
+          cursor:pointer !important;
+          user-select:none !important;
+          text-decoration:none !important;
+          white-space:nowrap !important;
+          vertical-align:middle !important;
 
-          transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease;
+          transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease !important;
         }
         .cbtn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.25); }
         .cbtn:active:not(:disabled){ transform:translateY(0); }
         .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
-
-        .cbtn-primary{
-          background:linear-gradient(90deg,#fa1a81,#b57eff);
-          border-color:rgba(255,255,255,.28);
-          box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28);
-        }
-        .cbtn-primary:hover:not(:disabled){
-          box-shadow:0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45);
-        }
-        .cbtn-x{
-          background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%);
-          border-color:rgba(255,255,255,.22);
-        }
+        .cbtn-primary{ background:linear-gradient(90deg,#fa1a81,#b57eff); border-color:rgba(255,255,255,.28); box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28); }
+        .cbtn-primary:hover:not(:disabled){ box-shadow:0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45); }
+        .cbtn-x{ background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%); border-color:rgba(255,255,255,.22); }
         .cbtn-ghost{ background:rgba(255,255,255,.12); }
         .cbtn-outline{ background:transparent; border-color:rgba(255,255,255,.35); }
 
-        .ns-inputrow .cbtn{ margin-left:2px; }
-
-        /* Icons in buttons */
-        .ic{ width:18px; height:18px; flex:0 0 auto; display:inline-block; opacity:.92; }
+        /* Icon + label inside button */
+        .ic{ width:20px !important; height:20px !important; display:inline-block !important; flex:0 0 20px !important; opacity:.92 !important; }
+        .lbl{ display:inline-block !important; line-height:1 !important; }
 
         /* Table + rows */
-        .lb-card{
-          position:relative; border-radius:18px; padding:14px;
-          background:var(--panel); backdrop-filter:blur(12px) saturate(1.35);
-          border:1px solid rgba(255,255,255,.12); overflow:hidden;
-        }
+        .lb-card{ position:relative; border-radius:18px; padding:14px; background:var(--panel);
+          backdrop-filter:blur(12px) saturate(1.35); border:1px solid rgba(255,255,255,.12); overflow:hidden; }
         .lb-table{ color:#fff; }
-        .lb-row{
-          display:grid; grid-template-columns:64px 1fr 160px;
-          align-items:center; padding:12px 14px; border-radius:12px; line-height:1.35;
-          transition:transform .12s ease, background .18s ease, box-shadow .18s ease;
-        }
+        .lb-row{ display:grid; grid-template-columns:64px 1fr 160px; align-items:center; padding:12px 14px; border-radius:12px; line-height:1.35;
+          transition:transform .12s ease, background .18s ease, box-shadow .18s ease; }
         .lb-row.rank-change{ animation:rise 120ms ease-out; }
         @keyframes rise{ from{ transform:translateY(3px); opacity:.92 } to{ transform:translateY(0); opacity:1 } }
-        .lb-head{ position:sticky; top:0; z-index:2; background:linear-gradient(90deg, rgba(250,26,129,.28), rgba(176,126,255,.28)); border:1px solid rgba(255,255,255,.16); margin-bottom:10px; backdrop-filter: blur(8px); }
+        .lb-head{ position:sticky; top:0; z-index:2; background:linear-gradient(90deg, rgba(250,26,129,.28), rgba(176,126,255,.28));
+          border:1px solid rgba(255,255,255,.16); margin-bottom:10px; backdrop-filter: blur(8px); }
         .lb-th{ font-weight:900; color:#ffe9f6; letter-spacing:.2px; }
         .lb-td{ color:#fff; }
         .lb-row:not(.lb-head):nth-child(even){ background:rgba(255,255,255,.04); }
@@ -786,7 +727,8 @@ export default function LeaderboardPage(){
         .lb-wallet{ font-size:.86rem; color:#ffd1ec99; }
         .w-10{ width:64px; } .w-28{ width:140px; } .w-32{ width:160px; }
         .text-right{ text-align:right; }
-        .lb-me{ background:linear-gradient(90deg, rgba(181,255,252,.18), rgba(224,152,248,.18)); outline:1.5px solid rgba(181,255,252,.6); box-shadow:0 0 0 2px rgba(255,255,255,.08) inset, 0 0 18px rgba(181,255,252,.35); }
+        .lb-me{ background:linear-gradient(90deg, rgba(181,255,252,.18), rgba(224,152,248,.18)); outline:1.5px solid rgba(181,255,252,.6);
+          box-shadow:0 0 0 2px rgba(255,255,255,.08) inset, 0 0 18px rgba(181,255,252,.35); }
         .delta{ font-size:.78rem; margin-left:8px; padding:2px 6px; border-radius:999px; background:rgba(255,255,255,.12); }
         .delta.up{ color:#b5fffc; } .delta.down{ color:#ffb6d5; }
 
@@ -795,13 +737,14 @@ export default function LeaderboardPage(){
         .copy-wallet:hover .cp{ opacity:.95; transform:translateY(-1px) scale(1.04); }
 
         .shine{ position:relative; }
-        .shine::after{ content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,#ffffff66,transparent); transform:translateX(-120%); animation:shine 700ms ease-out; }
+        .shine::after{ content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,#ffffff66,transparent);
+          transform:translateX(-120%); animation:shine 700ms ease-out; }
         @keyframes shine{ to{ transform:translateX(120%) } }
 
         @media (max-width:380px){
           .lb-card{ padding:10px; }
           .lb-row{ padding:10px 10px; }
-          .cbtn{ padding:10px 14px; }
+          .cbtn{ padding:10px 14px !important; }
           .ns-card{ padding:12px; }
           .ns-input{ padding:10px 14px; }
         }
