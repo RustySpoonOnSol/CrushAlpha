@@ -459,18 +459,37 @@ export default function LeaderboardPage(){
     const total = allFlirts.length;
     const percentile = me ? formatPercentile(me._rank, total) : "—";
 
+    // ====== NEW: Share page URL (/u/{name-or-wallet}) ======
+    const base =
+      (process.env.NEXT_PUBLIC_SITE_URL ||
+        (typeof window !== "undefined" && window.location?.origin) ||
+        "").replace(/\/$/, "");
+    const shareId =
+      (me?.name && me.name.trim()) ||
+      me?.wallet ||
+      myWallet ||
+      guestId ||
+      "";
+    const shareUrl = shareId ? `${base}/u/${encodeURIComponent(shareId)}` : "";
+
+    const copyShare = async () => {
+      if(!shareUrl) return;
+      try { await navigator.clipboard.writeText(shareUrl); addToast("Share link copied"); }
+      catch { prompt("Copy this share link:", shareUrl); }
+    };
+    const openShare = () => {
+      if(!shareUrl) return;
+      window.open(shareUrl, "_blank", "noopener,noreferrer");
+    };
     const shareToX = () => {
-      if(!me) return;
-      const origin = (typeof window !== "undefined" && window.location && window.location.origin)
-        ? window.location.origin : "https://yourdomain.com";
-      const url = (typeof window !== "undefined" && window.location?.href)
-        ? window.location.href : `${origin}/leaderboard`;
+      if(!me || !shareUrl) return;
       const name = (me.name && me.name.trim()) || (me.wallet?.slice(0,4) + "…" + me.wallet?.slice(-4));
       const xp = Number(me.xp || 0).toLocaleString();
       const text = `$CRUSH ${name} — Global Rank #${me._rank} (${xp} XP)`;
-      const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+      const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`;
       window.open(intent, "_blank", "noopener,noreferrer");
     };
+    // ====== /NEW ======
 
     return (
       <div className="ns-card" role="group" aria-label="Claim name and share">
@@ -506,18 +525,36 @@ export default function LeaderboardPage(){
             onClick={shareToX}
             aria-label="Share to X"
             title="Shares your rank + XP"
-            disabled={!me}
+            disabled={!me || !shareUrl}
           >
             Share to X
           </button>
+          <button
+            className="share-btn"
+            onClick={copyShare}
+            aria-label="Copy share link"
+            title="Copy /u link"
+            disabled={!shareUrl}
+          >
+            Copy Share Link
+          </button>
+          <button
+            className="share-btn"
+            onClick={openShare}
+            aria-label="Open share card"
+            title="Open your /u card"
+            disabled={!shareUrl}
+          >
+            Open Share Card
+          </button>
 
-            {me ? (
-              <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
-                <span className="hrl-label">Flirt rank</span>{" "}
-                <span className="hrl-badge">#{me._rank}</span>{" "}
-                <span className="hrl-sub">Top {percentile}%</span>
-              </div>
-            ) : null}
+          {me ? (
+            <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
+              <span className="hrl-label">Flirt rank</span>{" "}
+              <span className="hrl-badge">#{me._rank}</span>{" "}
+              <span className="hrl-sub">Top {percentile}%</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
