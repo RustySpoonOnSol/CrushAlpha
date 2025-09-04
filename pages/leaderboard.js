@@ -101,7 +101,6 @@ export default function LeaderboardPage(){
   async function fetchTopHolders(){
     try{
       setHoldersLoading(true);
-      // Prefer your server API (uses your Solana RPC with no CORS)
       if (CRUSH_MINT) {
         try {
           const r = await fetch(`/api/holders/top?mint=${encodeURIComponent(CRUSH_MINT)}&limit=25`);
@@ -113,7 +112,6 @@ export default function LeaderboardPage(){
           }
         } catch(_) {}
       }
-      // Fallback to Helius if configured
       if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
         setHolders([]); setAllHolders([]); return;
       }
@@ -162,7 +160,6 @@ export default function LeaderboardPage(){
   const prevXp = useRef(new Map());
   const [shine,setShine] = useState(()=>new Set());
 
-  // Build local/demo list, include "me" if present
   const buildLocalFlirts = useMemo(() => {
     return (meName, meId) => {
       const base = [...DEMO_FLIRTS];
@@ -188,7 +185,6 @@ export default function LeaderboardPage(){
       const meName = storedDisplayName;
       const meId = myWallet || guestId || "guest_demo_me";
 
-      // Call your server API (reads Supabase on the server; no client createClient)
       let rows = [];
       try {
         const r = await fetch("/api/leaderboard/top", { headers: { "cache-control": "no-cache" } });
@@ -201,14 +197,11 @@ export default function LeaderboardPage(){
       }
 
       if (!rows.length) {
-        // Fallback demo list
         rows = buildLocalFlirts(meName, meId);
       } else {
-        // Ensure "me" is present
         if (!rows.some(r => r.wallet === meId)) {
           rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
         }
-        // Optional filter
         if (HIDE_ANON_GUEST_ROWS) {
           rows = rows.filter(r => {
             const isMyGuest = guestId && r.wallet === guestId;
@@ -222,7 +215,6 @@ export default function LeaderboardPage(){
         rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
       }
 
-      // Shine effect on xp increase
       rows.forEach(r => {
         const prev = prevXp.current.get(r.wallet) || 0;
         if ((r.xp || 0) > prev) {
@@ -244,7 +236,7 @@ export default function LeaderboardPage(){
     }
   }
 
-  /* ---------- Username (availability + save) [local only in alpha] ---------- */
+  /* ---------- Username (availability + save) ---------- */
   const [nameDraft,setNameDraft] = useState("");
   const [nameSaving,setNameSaving] = useState(false);
   const [nameMsg,setNameMsg] = useState("");
@@ -309,7 +301,6 @@ export default function LeaderboardPage(){
       if(!cleaned || cleaned===initialName){ setAvailState("idle"); return; }
       try{
         setAvailState("checking");
-        // Local “availability”: exact, case-insensitive against current board
         const target = canon(cleaned);
         const takenByOther = (allFlirts || []).some(
           (r) => r.wallet !== myIdentifier && canon(r.name) === target
@@ -336,7 +327,6 @@ export default function LeaderboardPage(){
 
     setNameSaving(true); setNameMsg("");
     try{
-      // Local duplication guard
       const target = canon(cleaned);
       const takenByOther = (allFlirts || []).some(
         (r) => r.wallet !== myIdentifier && canon(r.name) === target
@@ -348,18 +338,11 @@ export default function LeaderboardPage(){
         return;
       }
 
-      // Save locally and update board
       localStorage.setItem(LS_DISPLAY_NAME_KEY, cleaned);
       setStoredDisplayName(cleaned);
 
-      setAllFlirts(list => {
-        const mapped = list.map(r => r.wallet === myIdentifier ? { ...r, name: cleaned } : r);
-        return mapped;
-      });
-      setFlirts(list => {
-        const mapped = list.map(r => r.wallet === myIdentifier ? { ...r, name: cleaned } : r);
-        return mapped;
-      });
+      setAllFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
+      setFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
 
       setAvailState("available");
       setInitialName(cleaned);
@@ -378,7 +361,6 @@ export default function LeaderboardPage(){
   useEffect(()=>{
     fetchTopHolders(); fetchTopFlirts();
 
-    // Simple periodic refresh (demo xp tick + holders polling)
     let t1,t2;
     const start=()=>{
       t1=setInterval(()=>{
@@ -417,6 +399,7 @@ export default function LeaderboardPage(){
     const idx = allHolders.findIndex(h => h.wallet === myWallet);
     if(idx < 0) return null;
     const entry = allHolders[idx];
+
     const prevIdx = prevHolderRankRef.current;
     const delta = typeof prevIdx==="number" ? (prevIdx - idx) : 0;
     prevHolderRankRef.current = idx;
@@ -456,7 +439,6 @@ export default function LeaderboardPage(){
     const total = allFlirts.length;
     const myPercentile = me ? formatPercentile(me._rank, total) : "—";
 
-    // Share URL → /u/{name-or-wallet}
     const base =
       (process.env.NEXT_PUBLIC_SITE_URL ||
         (typeof window !== "undefined" && window.location?.origin) ||
@@ -517,15 +499,15 @@ export default function LeaderboardPage(){
           <div className="share-title">Share your rank</div>
           <div className="share-group" role="group" aria-label="Share actions">
             <button className="cbtn cbtn-x" onClick={shareToX} disabled={!me || !shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
+              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
               <span>Share to X</span>
             </button>
             <button className="cbtn cbtn-ghost" onClick={copyShare} disabled={!shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span>Copy link</span>
             </button>
             <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
+              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
               <span>Open card</span>
             </button>
           </div>
@@ -671,7 +653,7 @@ export default function LeaderboardPage(){
           color:#fff0fc; text-shadow:0 0 8px #fa1a81, 0 0 18px #ffb6d5;
         }
 
-        /* Rank pill (shared) */
+        /* Rank pill */
         .hrl, .holders-rank-line{
           display:inline-flex; align-items:baseline; gap:12px;
           padding:10px 14px; border-radius:999px;
@@ -693,7 +675,7 @@ export default function LeaderboardPage(){
         .hrl-cur{ margin-left:6px; font-weight:900; opacity:.9; }
         .hrl-sub{ font-weight:900; opacity:.88; }
 
-        /* --- Name & Share card (polished) --- */
+        /* Name & Share card */
         .ns-card{
           display:grid; grid-template-columns: 1fr auto; gap:22px;
           margin:8px 6px 18px; padding:16px 18px;
@@ -706,7 +688,6 @@ export default function LeaderboardPage(){
 
         .ns-left{ min-width: 280px; }
         .ns-title{ font-weight:1000; color:#fff; margin:4px 0 10px 2px; letter-spacing:.2px; }
-
         .ns-inputrow{ display:flex; gap:12px; align-items:center; }
         .ns-input{
           flex:1 1 auto; min-width:220px;
@@ -722,19 +703,21 @@ export default function LeaderboardPage(){
         .ns-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
         @media (max-width:860px){ .ns-right{ align-items:flex-start; } }
         .share-title{ font-weight:900; color:#fff; opacity:.95; margin:2px 0 2px; }
-        .share-group{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
 
-        /* ===========================
-           Crush Buttons (no collisions)
-           =========================== */
+        /* Share group layout */
+        .share-group{
+          display:flex;
+          flex-wrap:wrap;
+          align-items:center;
+          gap:14px;              /* EVEN spacing between buttons */
+        }
+
+        /* Crush Buttons (no collisions) */
         .cbtn{
-          all: unset;
-          box-sizing: border-box;
-
           display:inline-flex;
           align-items:center;
           justify-content:center;
-          gap:8px;
+          gap:10px;
 
           padding:12px 16px;
           min-height:40px;
@@ -747,11 +730,12 @@ export default function LeaderboardPage(){
           line-height:1;
           color:#fff;
 
-          background:rgba(255,255,255,.10);
+          background:rgba(255,255,255,.12);
           cursor:pointer;
           user-select:none;
           text-decoration:none;
           white-space:nowrap;
+          vertical-align:middle;
 
           transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease;
         }
@@ -759,7 +743,6 @@ export default function LeaderboardPage(){
         .cbtn:active:not(:disabled){ transform:translateY(0); }
         .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
 
-        /* Variants */
         .cbtn-primary{
           background:linear-gradient(90deg,#fa1a81,#b57eff);
           border-color:rgba(255,255,255,.28);
@@ -777,8 +760,8 @@ export default function LeaderboardPage(){
 
         .ns-inputrow .cbtn{ margin-left:2px; }
 
-        /* Icons inside buttons */
-        .ic{ display:inline-block; width:16px; height:16px; opacity:.92; }
+        /* Icons in buttons */
+        .ic{ width:18px; height:18px; flex:0 0 auto; display:inline-block; opacity:.92; }
 
         /* Table + rows */
         .lb-card{
@@ -815,7 +798,6 @@ export default function LeaderboardPage(){
         .shine::after{ content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,#ffffff66,transparent); transform:translateX(-120%); animation:shine 700ms ease-out; }
         @keyframes shine{ to{ transform:translateX(120%) } }
 
-        /* Mobile micro-polish */
         @media (max-width:380px){
           .lb-card{ padding:10px; }
           .lb-row{ padding:10px 10px; }
@@ -824,7 +806,6 @@ export default function LeaderboardPage(){
           .ns-input{ padding:10px 14px; }
         }
 
-        /* Toasts */
         .toasts{ position: fixed; right: 14px; bottom: 14px; display:flex; flex-direction:column; gap:8px; z-index: 9999; }
         .toast{ background: rgba(25,25,28,.9); color:#fff; padding:10px 14px; border-radius:10px; font-weight:900; border:1px solid rgba(255,255,255,.18); }
       `}</style>
