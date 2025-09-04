@@ -75,6 +75,16 @@ function formatPercentile(rank, total){
 }
 const canon = (s) => (s || "").trim().toLowerCase();
 
+/* Add UTM params to links for clean analytics */
+function withUTM(url, params){
+  try{
+    const base = typeof window !== "undefined" ? window.location.origin : "https://example.com";
+    const u = new URL(url, base);
+    Object.entries(params||{}).forEach(([k,v]) => u.searchParams.set(k, v));
+    return u.toString();
+  }catch{ return url; }
+}
+
 /* ========================================================= */
 export default function LeaderboardPage(){
   const { publicKey } = useWallet();
@@ -398,6 +408,7 @@ export default function LeaderboardPage(){
     const idx = allHolders.findIndex(h => h.wallet === myWallet);
     if(idx < 0) return null;
     const entry = allHolders[idx];
+
     const prevIdx = prevHolderRankRef.current;
     const delta = typeof prevIdx==="number" ? (prevIdx - idx) : 0;
     prevHolderRankRef.current = idx;
@@ -447,7 +458,10 @@ export default function LeaderboardPage(){
       myWallet ||
       guestId ||
       "";
-    const shareUrl = shareId ? `${base}/u/${encodeURIComponent(shareId)}` : "";
+    const rawUrl = shareId ? `${base}/u/${encodeURIComponent(shareId)}` : "";
+    const shareUrl = rawUrl
+      ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
+      : "";
 
     const copyShare = async () => {
       if(!shareUrl) return;
@@ -463,8 +477,18 @@ export default function LeaderboardPage(){
       const name = (me.name && me.name.trim()) || (me.wallet?.slice(0,4) + "…" + me.wallet?.slice(-4));
       const xp = Number(me.xp || 0).toLocaleString();
       const text = `$CRUSH ${name} — Global Rank #${me._rank} (${xp} XP)`;
-      const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`;
+      const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}&hashtags=CrushAI,Solana`;
       window.open(intent, "_blank", "noopener,noreferrer");
+    };
+    const shareNative = async () => {
+      if (!shareUrl) return;
+      if (typeof navigator !== "undefined" && navigator.share) {
+        try {
+          await navigator.share({ title: "Crush AI — My Rank", url: shareUrl });
+        } catch {}
+      } else {
+        copyShare();
+      }
     };
 
     return (
@@ -485,8 +509,9 @@ export default function LeaderboardPage(){
               className={`ns-input ${availState}`}
               disabled={!myIdentifier}
               aria-invalid={availState==="invalid"||availState==="taken"}
+              aria-label="Your public name"
             />
-            <button className="cbtn cbtn-primary" onClick={saveName} disabled={disableSave}>
+            <button className="cbtn cbtn-primary" onClick={saveName} disabled={disableSave} title="Save name">
               {nameSaving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -496,17 +521,21 @@ export default function LeaderboardPage(){
         <div className="ns-right">
           <div className="share-title">Share your rank</div>
           <div className="share-group" role="group" aria-label="Share actions">
-            <button className="cbtn cbtn-x" onClick={shareToX} disabled={!me || !shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
+            <button className="cbtn cbtn-x" onClick={shareToX} disabled={!me || !shareUrl} title="Share on X (Twitter)">
+              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.1 3h-3.1l-4.2 5.7L8 3H3.6l6 8.2L3 21h3.1l4.6-6.2L16 21h4.4l-6.5-8.9L20.1 3z"/></svg>
               <span className="lbl">Share to X</span>
             </button>
-            <button className="cbtn cbtn-ghost" onClick={copyShare} disabled={!shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+            <button className="cbtn cbtn-ghost" onClick={copyShare} disabled={!shareUrl} title="Copy share link">
+              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span className="lbl">Copy link</span>
             </button>
-            <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl}>
-              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
+            <button className="cbtn cbtn-outline" onClick={openShare} disabled={!shareUrl} title="Open your share card">
+              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v16H4zM2 2v20h20V2H2zm6 6h8v8H8z"/></svg>
               <span className="lbl">Open card</span>
+            </button>
+            <button className="cbtn cbtn-ghost" onClick={shareNative} disabled={!shareUrl} title="Share via device">
+              <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13 3h-2v8H3v2h8v8h2v-8h8v-2h-8z"/></svg>
+              <span className="lbl">Share</span>
             </button>
           </div>
 
@@ -514,7 +543,7 @@ export default function LeaderboardPage(){
             <div className="hrl small" aria-label="Your flirt rank" aria-live="polite" role="group">
               <span className="hrl-label">Flirt rank</span>{" "}
               <span className="hrl-badge">#{me._rank}</span>{" "}
-              <span className="hrl-sub">Top {myPercentile}%</span>
+              <span className="hrl-sub">Top {formatPercentile(me._rank, totalCount(allFlirts))}%</span>
             </div>
           ) : null}
         </div>
@@ -522,13 +551,20 @@ export default function LeaderboardPage(){
     );
   }
 
+  function totalCount(list){ return Array.isArray(list) ? list.length : 0; }
+
   async function copyWallet(text){
     try{ await navigator.clipboard.writeText(text); addToast("Copied"); }catch{}
   }
 
   return (
     <>
-      <Head><title>Crush AI · Leaderboard</title></Head>
+      <Head>
+        <title>Crush AI · Leaderboard</title>
+        <meta name="description" content="Climb the Crush AI leaderboard. Chat, flirt, earn XP, flaunt your rank." />
+        <meta property="og:title" content="Crush AI — Leaderboard" />
+        <meta property="og:description" content="Chat. Flirt. Climb. See top $CRUSH holders and flirt ranks." />
+      </Head>
 
       <div className="lb-container">
         <section className="lb-section">
@@ -554,7 +590,8 @@ export default function LeaderboardPage(){
                     <div className="lb-td">
                       <span className="copy-wallet" role="button" tabIndex={0}
                         onClick={()=>copyWallet(h.wallet)}
-                        onKeyDown={(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); copyWallet(h.wallet);} }}>
+                        onKeyDown={(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); copyWallet(h.wallet);} }}
+                        aria-label={`Copy wallet ${h.wallet}`}>
                         {short(h.wallet)}<svg className="cp" width="14" height="14" viewBox="0 0 24 24"><path d="M9 9h10v12H9z"/><path d="M5 5h10v4H9a4 4 0 0 0-4 4V5z"/></svg>
                       </span>
                     </div>
@@ -598,7 +635,8 @@ export default function LeaderboardPage(){
                       <span className="lb-name">{r.name || short(r.wallet)}</span>
                       <span className="lb-wallet copy-wallet" role="button" tabIndex={0}
                         onClick={()=>copyWallet(r.wallet)}
-                        onKeyDown={(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); copyWallet(r.wallet);} }}>
+                        onKeyDown={(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); copyWallet(r.wallet);} }}
+                        aria-label={`Copy wallet ${r.wallet}`}>
                         {short(r.wallet)}<svg className="cp" width="12" height="12" viewBox="0 0 24 24"><path d="M9 9h10v12H9z"/><path d="M5 5h10v4H9a4 4 0 0 0-4 4V5z"/></svg>
                       </span>
                     </div>
@@ -665,9 +703,9 @@ export default function LeaderboardPage(){
         .share-title{ font-weight:900; color:#fff; opacity:.95; margin:2px 0 2px; }
 
         /* Share group — even spacing */
-        .share-group{ display:flex; flex-wrap:wrap; align-items:center; column-gap:16px; row-gap:10px; }
+        .share-group{ display:flex; flex-wrap:wrap; align-items:center; column-gap:18px; row-gap:12px; }
 
-        /* Crush Buttons (collision-proof) */
+        /* Crush Buttons (collision-proof + focus/hover) */
         .cbtn{
           display:inline-flex !important;
           flex-direction:row !important;
@@ -696,9 +734,10 @@ export default function LeaderboardPage(){
 
           transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease !important;
         }
-        .cbtn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.25); }
+        .cbtn:hover:not(:disabled){ transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
         .cbtn:active:not(:disabled){ transform:translateY(0); }
         .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
+        .cbtn:focus-visible{ outline:3px solid rgba(181,255,252,.85); outline-offset:2px; box-shadow:0 0 0 6px rgba(181,255,252,.20); }
         .cbtn-primary{ background:linear-gradient(90deg,#fa1a81,#b57eff); border-color:rgba(255,255,255,.28); box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28); }
         .cbtn-primary:hover:not(:disabled){ box-shadow:0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45); }
         .cbtn-x{ background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%); border-color:rgba(255,255,255,.22); }
@@ -708,6 +747,11 @@ export default function LeaderboardPage(){
         /* Icon + label inside button */
         .ic{ width:20px !important; height:20px !important; display:inline-block !important; flex:0 0 20px !important; opacity:.92 !important; }
         .lbl{ display:inline-block !important; line-height:1 !important; }
+
+        /* Mobile share buttons full width */
+        @media (max-width:560px){
+          .share-group .cbtn{ width:100% !important; justify-content:center !important; }
+        }
 
         /* Table + rows */
         .lb-card{ position:relative; border-radius:18px; padding:14px; background:var(--panel);
