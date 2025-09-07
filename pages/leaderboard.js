@@ -1,7 +1,8 @@
-// pages/leaderboard.js
+// src/pages/leaderboard.js
 import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { supabase } from "../utils/supabaseClient";
 
 /* ---------- ENV / RPC ---------- */
 const CRUSH_MINT = (process.env.NEXT_PUBLIC_CRUSH_MINT || "").replace(/:$/, "");
@@ -10,9 +11,15 @@ const HELIUS_RPC_URL = HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
   : null;
 
+/* ---------- Supabase presence ---------- */
+const HAS_SUPABASE =
+  !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
 /* ---------- localStorage keys ---------- */
 const LS_GUEST_ID_KEY = "crush_guest_id";
 const LS_DISPLAY_NAME_KEY = "crush_display_name";
+const LS_NAME_OWNER_KEY = "crush_name_owner"; // binds name -> (wallet or guest)
 
 /* ---------- UI guards ---------- */
 const SOFT_BAN = [
@@ -85,6 +92,21 @@ function withUTM(url, params){
   }catch{ return url; }
 }
 
+/* ---------- Supabase: who owns a name? ---------- */
+async function getNameOwner(name) {
+  if (!HAS_SUPABASE || !name) return null;
+  try {
+    const { data } = await supabase
+      .from("leaderboard")
+      .select("wallet,name")
+      .ilike("name", name)
+      .maybeSingle();
+    return data?.wallet || null;
+  } catch {
+    return null;
+  }
+}
+
 /* ========================================================= */
 export default function LeaderboardPage(){
   const { publicKey } = useWallet();
@@ -93,12 +115,17 @@ export default function LeaderboardPage(){
   const [guestId,setGuestId] = useState(null);
   const [storedDisplayName,setStoredDisplayName] = useState("");
 
+  // Seed guest id and read locally stored name, but only if it belongs to this identity
   useEffect(()=>{
     if(typeof window!=="undefined"){
       const gid=ensureGuestId();
       setGuestId(gid);
-      setStoredDisplayName(localStorage.getItem(LS_DISPLAY_NAME_KEY)||"");
+      const saved = (localStorage.getItem(LS_DISPLAY_NAME_KEY)||"").trim();
+      const owner = localStorage.getItem(LS_NAME_OWNER_KEY)||"";
+      const me = myWallet || gid || "";
+      setStoredDisplayName(saved && owner === me ? saved : "");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[myWallet]);
 
   const myIdentifier = myWallet || guestId || null;
@@ -210,6 +237,25 @@ export default function LeaderboardPage(){
         if (!rows.some(r => r.wallet === meId)) {
           rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
         }
+
+        // If my row has a name, only keep it if DB confirms I own it
+        if (myIdentifier && HAS_SUPABASE) {
+          const i = rows.findIndex(r => r.wallet === myIdentifier && r.name);
+          if (i >= 0) {
+            const owner = await getNameOwner(rows[i].name);
+            if (owner && owner !== myIdentifier) {
+              rows[i] = { ...rows[i], name: null };
+              try {
+                const savedOwner = localStorage.getItem(LS_NAME_OWNER_KEY);
+                if (savedOwner && savedOwner !== myIdentifier) {
+                  localStorage.removeItem(LS_DISPLAY_NAME_KEY);
+                  localStorage.removeItem(LS_NAME_OWNER_KEY);
+                }
+              } catch {}
+            }
+          }
+        }
+
         if (HIDE_ANON_GUEST_ROWS) {
           rows = rows.filter(r => {
             const isMyGuest = guestId && r.wallet === guestId;
@@ -268,7 +314,13 @@ export default function LeaderboardPage(){
     if(seededNameRef.current) return;
     if(isEditingRef.current) return;
     const me = myIdentifier ? allFlirts.find(r=>r.wallet===myIdentifier) : null;
-    const initial = (me?.name || storedDisplayName || "").trim();
+
+    // Only seed the local name if it is owned by this identity
+    const ownerOk =
+      typeof window !== "undefined" &&
+      (localStorage.getItem(LS_NAME_OWNER_KEY)||"") === (myIdentifier||"");
+
+    const initial = (me?.name || (ownerOk ? storedDisplayName : "") || "").trim();
     setNameDraft(initial);
     setInitialName(initial);
     setNameMsg(""); setAvailState("idle");
@@ -347,7 +399,9 @@ export default function LeaderboardPage(){
         return;
       }
 
+      // Bind name to this identity
       localStorage.setItem(LS_DISPLAY_NAME_KEY, cleaned);
+      localStorage.setItem(LS_NAME_OWNER_KEY, myIdentifier);
       setStoredDisplayName(cleaned);
 
       setAllFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
@@ -464,13 +518,13 @@ export default function LeaderboardPage(){
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
-    // --- Open X banner (1500x500) with stats overlaid (now passes custom bg)
+    // --- Open X banner (1500x500) with stats overlaid (custom bg)
     const bannerParams = new URLSearchParams({
       name: (me?.name || shareId || "Anonymous"),
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
-      bg: `${base}/brand/x-banner.jpg`, // <- ensure your banner in /public/brand/
+      bg: `${base}/brand/x-banner.jpg`, // ensure your banner exists in /public/brand/x-banner.jpg
     });
     const openBanner = () => {
       if (!shareId) return;
@@ -545,7 +599,7 @@ export default function LeaderboardPage(){
               <span className="lbl">Copy link</span>
             </button>
             {/* Open the X banner generator */}
-            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareUrl} title="Open X banner">
+            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareUrl} title="Open X card">
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v12H4zM8 4h8v4H8zM9 10h6v6H9z"/></svg>
               <span className="lbl">Open card</span>
             </button>
@@ -773,7 +827,7 @@ export default function LeaderboardPage(){
         .lb-card{ position:relative; border-radius:18px; padding:14px; background:var(--panel);
           backdrop-filter:blur(12px) saturate(1.35); border:1px solid rgba(255,255,255,.12); overflow:hidden; }
         .lb-table{ color:#fff; }
-        .lb-row{ display:grid; grid-template-columns:64px 1fr 160px; align-items:center; padding:12px 14px; border-radius:12px; line-height:1.35;
+        .lb-row{ display:grid; grid-template-columns:64px 1fr 140px; align-items:center; padding:12px 14px; border-radius:12px; line-height:1.35;
           transition:transform .12s ease, background .18s ease, box-shadow .18s ease; }
         .lb-row.rank-change{ animation:rise 120ms ease-out; }
         @keyframes rise{ from{ transform:translateY(3px); opacity:.92 } to{ transform:translateY(0); opacity:1 } }

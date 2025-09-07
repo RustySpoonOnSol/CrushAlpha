@@ -1,4 +1,4 @@
-// pages/index.js
+// src/pages/index.js
 import Head from "next/head";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
@@ -18,7 +18,71 @@ const CUPID_RIGHT_IMG = "/cupid_male.png";
 /* ---------- CONFIG ---------- */
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500"); // gate = 500 tokens
 const HAS_SUPABASE =
-  !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+/* ---------- NAME OWNERSHIP (wallet/guest binding) ---------- */
+const LS_NAME = "crush_display_name";
+const LS_NAME_OWNER = "crush_name_owner";
+const LS_GUEST = "crush_guest_id";
+const LS_WALLET = "crush_wallet";
+
+function ensureGuestId() {
+  let g = "";
+  try {
+    g = localStorage.getItem(LS_GUEST) || "";
+    if (!g) {
+      g = "guest_" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(LS_GUEST, g);
+    }
+  } catch {}
+  return g;
+}
+function currentIdentifier(wallet) {
+  return wallet || localStorage.getItem(LS_WALLET) || ensureGuestId();
+}
+
+// DB guard: is this name taken by a different wallet?
+async function isNameTakenByOther(name, myId) {
+  if (!HAS_SUPABASE || !name) return false;
+  try {
+    const { data, error } = await supabase
+      .from("leaderboard")
+      .select("wallet,name")
+      .ilike("name", name)
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return false;
+    return data.wallet && data.wallet !== myId;
+  } catch {
+    return false;
+  }
+}
+
+// Enforce that the locally shown name belongs to the current identity
+async function enforceNameOwnership(currentWallet, setDisplayName) {
+  const me = currentIdentifier(currentWallet);
+  const stored = (localStorage.getItem(LS_NAME) || "").trim();
+  const owner = localStorage.getItem(LS_NAME_OWNER);
+
+  // If the stored name belongs to someone else → clear it
+  if (stored && owner && owner !== me) {
+    localStorage.removeItem(LS_NAME);
+    localStorage.removeItem(LS_NAME_OWNER);
+    setDisplayName("");
+    return;
+  }
+
+  // If Supabase is on, also double-check the DB
+  if (stored && (await isNameTakenByOther(stored, me))) {
+    localStorage.removeItem(LS_NAME);
+    localStorage.removeItem(LS_NAME_OWNER);
+    setDisplayName("");
+    return;
+  }
+
+  setDisplayName(stored || "");
+}
 
 /* ---------- helpers for client-only emoji bursts ---------- */
 function getSidePositions(side, count) {
@@ -181,9 +245,11 @@ export default function Home() {
       if (!pubkey) throw new Error("No public key");
       setWallet(pubkey);
       try {
-        localStorage.setItem("crush_wallet", pubkey);
+        localStorage.setItem(LS_WALLET, pubkey);
       } catch {}
       await refreshBalance(pubkey);
+      // Enforce name ownership when wallet connects/changes
+      enforceNameOwnership(pubkey, setDisplayName);
     } catch (e) {
       setGateError(e?.message || "Failed to connect wallet");
     }
@@ -197,8 +263,10 @@ export default function Home() {
     setHoldBalance(0);
     setTierName("");
     try {
-      localStorage.removeItem("crush_wallet");
+      localStorage.removeItem(LS_WALLET);
     } catch {}
+    // Enforce ownership on disconnect (will fall back to guest id)
+    enforceNameOwnership(null, setDisplayName);
   }
 
   async function refreshBalance(pubkey = wallet) {
@@ -219,10 +287,11 @@ export default function Home() {
   // Auto-restore + trusted reconnect
   useEffect(() => {
     if (!mounted) return;
-    const stored = localStorage.getItem("crush_wallet");
+    const stored = localStorage.getItem(LS_WALLET);
     if (stored) {
       setWallet(stored);
       refreshBalance(stored);
+      enforceNameOwnership(stored, setDisplayName);
     } else if (window?.solana?.isPhantom) {
       window.solana
         .connect({ onlyIfTrusted: true })
@@ -231,12 +300,20 @@ export default function Home() {
           if (pk) {
             setWallet(pk);
             try {
-              localStorage.setItem("crush_wallet", pk);
+              localStorage.setItem(LS_WALLET, pk);
             } catch {}
             refreshBalance(pk);
+            enforceNameOwnership(pk, setDisplayName);
+          } else {
+            // no wallet → enforce as guest
+            enforceNameOwnership(null, setDisplayName);
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          enforceNameOwnership(null, setDisplayName);
+        });
+    } else {
+      enforceNameOwnership(null, setDisplayName);
     }
   }, [mounted]);
 
@@ -257,54 +334,62 @@ export default function Home() {
     } catch {}
   }, [mounted]);
 
-  // Display name
+  // Display name (bound to owner)
   const [displayName, setDisplayName] = useState("");
-  useEffect(() => {
-    try {
-      const n = (localStorage.getItem("crush_display_name") || "").trim();
-      setDisplayName(n);
-    } catch {}
-  }, []);
+
   function isValidDisplayName(s) {
-    return /^[a-zA-Z0-9_]{3,16}$/.test(s) && !/^anonymous$/i.test(s);
+    // 2–24 letters, numbers, space, . _ -
+    return /^[\p{L}\p{N} ._-]{2,24}$/u.test(s) && !/^anonymous$/i.test(s);
   }
-  function claimOrEditDisplayName() {
-    const current = (localStorage.getItem("crush_display_name") || "").trim();
+
+  async function claimOrEditDisplayName() {
+    const current = (localStorage.getItem(LS_NAME) || "").trim();
     const proposed = prompt(current ? "Edit your display name" : "Claim your display name", current);
     if (proposed == null) return;
     const name = proposed.trim();
     if (!isValidDisplayName(name)) {
-      alert("Pick 3–16 characters: letters, numbers, or underscore. 'anonymous' is reserved.");
+      alert("2–24 letters, numbers, space, . _ -  (and not 'anonymous')");
       return;
     }
+
+    const me = currentIdentifier(wallet);
+
+    // DB guard: block if someone else already owns it
+    if (await isNameTakenByOther(name, me)) {
+      alert("That name is already taken by another wallet.");
+      return;
+    }
+
+    // Save locally bound to current identity
     try {
-      localStorage.setItem("crush_display_name", name);
+      localStorage.setItem(LS_NAME, name);
+      localStorage.setItem(LS_NAME_OWNER, me);
     } catch {}
     setDisplayName(name);
+
+    // Sync to leaderboard (only includes name when owner matches)
     try {
-      updateLeaderboard(xp, level);
+      await updateLeaderboard(xp, level);
     } catch {}
   }
 
   // push latest XP/level to Supabase leaderboard (alpha-guarded)
   async function updateLeaderboard(newXp, newLevel) {
-    if (!HAS_SUPABASE) {
-      // quietly no-op in alpha
-      return;
-    }
+    if (!HAS_SUPABASE) return;
     try {
       const walletId =
-        localStorage.getItem("crush_wallet") ||
-        (function ensureGuest() {
-          let g = localStorage.getItem("crush_guest_id");
+        localStorage.getItem(LS_WALLET) ||
+        (function () {
+          let g = localStorage.getItem(LS_GUEST);
           if (!g) {
             g = "guest_" + Math.random().toString(36).slice(2, 10);
-            localStorage.setItem("crush_guest_id", g);
+            localStorage.setItem(LS_GUEST, g);
           }
           return g;
         })();
 
-      const display = (localStorage.getItem("crush_display_name") || "").trim();
+      const display = (localStorage.getItem(LS_NAME) || "").trim();
+      const owner = localStorage.getItem(LS_NAME_OWNER);
 
       const payload = {
         wallet: walletId,
@@ -312,9 +397,13 @@ export default function Home() {
         level: newLevel,
         updated_at: new Date(),
       };
-      if (display) payload.name = display;
 
-      const { error } = await supabase.from("leaderboard").upsert(payload, { onConflict: "wallet" });
+      // Only include name if the current identity owns it
+      if (display && owner === walletId) payload.name = display;
+
+      const { error } = await supabase
+        .from("leaderboard")
+        .upsert(payload, { onConflict: "wallet" });
       if (error) console.error("Supabase update failed:", error);
     } catch (e) {
       console.warn("Skipping Supabase sync:", e);
@@ -344,7 +433,10 @@ export default function Home() {
 
   const nextLevelXp = XP_LEVELS[level + 1] || xp + 100;
   const currentLevelXp = XP_LEVELS[level] || 0;
-  const barPercent = Math.min(100, Math.round(((xp - currentLevelXp) / (nextLevelXp - currentLevelXp)) * 100));
+  const barPercent = Math.min(
+    100,
+    Math.round(((xp - currentLevelXp) / (nextLevelXp - currentLevelXp)) * 100)
+  );
 
   /* ---------- FX state ---------- */
   const [floatingEmojis, setFloatingEmojis] = useState([]);
@@ -737,7 +829,14 @@ export default function Home() {
       {/* ---------- FULL-SCREEN CHAT OVERLAY ---------- */}
       <ChatOverlay open={isHolder && chatOpen} onClose={() => setChatOpen(false)}>
         {/* ChatBox should NOT request signatures; it only receives wallet for context */}
-        <ChatBox personaName="Xenia" stream={true} wallet={wallet} onMessageSent={handleXpGain} cooldownSeconds={10} className="mx-auto" />
+        <ChatBox
+          personaName="Xenia"
+          stream={true}
+          wallet={wallet}
+          onMessageSent={handleXpGain}
+          cooldownSeconds={10}
+          className="mx-auto"
+        />
       </ChatOverlay>
 
       {/* ---------- STYLES ---------- */}
@@ -751,63 +850,27 @@ export default function Home() {
           z-index: 30;
         }
         @keyframes fade-flash {
-          0% {
-            opacity: 0;
-          }
-          15% {
-            opacity: 1;
-          }
-          85% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0;
-          }
+          0% { opacity: 0; }
+          15% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { opacity: 0; }
         }
-        .kiss-emoji-animate {
-          animation: kiss-pop 2.3s infinite cubic-bezier(0.52, -0.19, 0.7, 1.41);
-        }
+        .kiss-emoji-animate { animation: kiss-pop 2.3s infinite cubic-bezier(0.52, -0.19, 0.7, 1.41); }
         @keyframes kiss-pop {
-          0%,
-          100% {
-            transform: scale(1) rotate(-7deg);
-          }
-          7% {
-            transform: scale(1.07) rotate(-5deg);
-          }
-          14% {
-            transform: scale(1.23) rotate(9deg);
-          }
-          23% {
-            transform: scale(1.08) rotate(-2deg);
-          }
-          32% {
-            transform: scale(1) rotate(2deg);
-          }
-          70% {
-            transform: scale(1.13) rotate(0deg);
-          }
+          0%, 100% { transform: scale(1) rotate(-7deg); }
+          7% { transform: scale(1.07) rotate(-5deg); }
+          14% { transform: scale(1.23) rotate(9deg); }
+          23% { transform: scale(1.08) rotate(-2deg); }
+          32% { transform: scale(1) rotate(2deg); }
+          70% { transform: scale(1.13) rotate(0deg); }
         }
-        .lips-emoji-animate {
-          animation: lips-bounce 1.8s infinite cubic-bezier(0.32, -0.29, 0.7, 1.41);
-        }
+        .lips-emoji-animate { animation: lips-bounce 1.8s infinite cubic-bezier(0.32, -0.29, 0.7, 1.41); }
         @keyframes lips-bounce {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          13% {
-            transform: scale(1.23);
-          }
-          27% {
-            transform: scale(0.97);
-          }
-          54% {
-            transform: scale(1.13);
-          }
-          70% {
-            transform: scale(1.09);
-          }
+          0%, 100% { transform: scale(1); }
+          13% { transform: scale(1.23); }
+          27% { transform: scale(0.97); }
+          54% { transform: scale(1.13); }
+          70% { transform: scale(1.09); }
         }
         .chatbox-glass {
           background: linear-gradient(135deg, #ffb6d5ee 10%, #fa1a81cc 100%);
@@ -817,145 +880,28 @@ export default function Home() {
           outline: 1.5px solid #ffd1ec88;
           outline-offset: 3px;
         }
-        .chatbox-panel {
-          background: transparent !important;
-          border-radius: 1.5em;
-          box-shadow: none;
-          padding: 1.2em 0.55em;
-          position: relative;
-          z-index: 4;
-        }
-        .shimmer {
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(120deg, #ffd1ec11 20%, #ffb6d577 44%, #e098f844 66%, #b5fffc11 100%);
-          opacity: 0.7;
-          pointer-events: none;
-        }
-        .flirt-xp-bar-outer {
-          margin: 0.7rem 0 1.5rem 0;
-          width: 360px;
-          max-width: 95vw;
-        }
-        .flirt-xp-label {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 1.04rem;
-          color: #ffb6d5;
-          margin-bottom: 0.15em;
-        }
-        .flirt-xp-badge {
-          background: #fa1a81cc;
-          border-radius: 9999px;
-          padding: 0.18em 0.98em;
-          color: #fff;
-          font-weight: 600;
-          box-shadow: 0 2px 12px #fa1a8126;
-          font-size: 1.1rem;
-        }
-        .flirt-xp-bar-bg {
-          background: #faf5fc42;
-          border-radius: 9999px;
-          height: 18px;
-          width: 100%;
-          overflow: hidden;
-        }
-        .flirt-xp-bar {
-          height: 100%;
-          border-radius: 9999px;
-        }
-        .flirt-xp-pop {
-          margin-top: 0.22em;
-          text-align: center;
-          color: #fff0fc;
-          text-shadow: 0 0 10px #fa1a81, 0 0 24px #fff0fc;
-          animation: pop-scale 1.2s;
-        }
-        @keyframes pop-scale {
-          0% {
-            transform: scale(1);
-          }
-          22% {
-            transform: scale(1.22);
-          }
-          57% {
-            transform: scale(0.98);
-          }
-          100% {
-            transform: scale(1);
-          }
-        }
-        .sparkle {
-          position: absolute;
-          width: 5px;
-          height: 5px;
-          border-radius: 99px;
-          background: linear-gradient(120deg, #fff0fc, #ffd1ec, #fa1a81 66%, #e098f8);
-          opacity: 0.36;
-          box-shadow: 0 0 11px 3px #ffd1eccc, 0 0 2px 1px #fff;
-          animation: sparkle-pop 4.9s infinite cubic-bezier(0.62, -0.19, 0.7, 1.21);
-        }
-        @keyframes sparkle-pop {
-          0% {
-            opacity: 0.1;
-            transform: scale(0.97);
-          }
-          14% {
-            opacity: 0.66;
-            transform: scale(1.32);
-          }
-          50% {
-            opacity: 0.92;
-          }
-          86% {
-            opacity: 0.46);
-            transform: scale(0.86);
-          }
-          100% {
-            opacity: 0.13;
-          }
-        }
-        .cupid-img {
-          position: absolute;
-          width: 108px;
-          height: auto;
-          z-index: 41;
-        }
-        .cupid-left {
-          top: 110px;
-          left: 6vw;
-        }
-        .cupid-right {
-          top: 114px;
-          right: 6vw;
-        }
-        @keyframes arrow-fly-right {
-          0% { left: 11vw; opacity: 0; }
-          10% { left: 13vw; opacity: 1; }
-          87% { left: 74vw; opacity: 1; }
-          100% { left: 80vw; opacity: 0; }
-        }
+        .chatbox-panel { background: transparent !important; border-radius: 1.5em; box-shadow: none; padding: 1.2em 0.55em; position: relative; z-index: 4; }
+        .shimmer { position: absolute; inset: 0; background: linear-gradient(120deg, #ffd1ec11 20%, #ffb6d577 44%, #e098f844 66%, #b5fffc11 100%); opacity: 0.7; pointer-events: none; }
+        .flirt-xp-bar-outer { margin: 0.7rem 0 1.5rem 0; width: 360px; max-width: 95vw; }
+        .flirt-xp-label { display: flex; justify-content: space-between; align-items: center; font-size: 1.04rem; color: #ffb6d5; margin-bottom: 0.15em; }
+        .flirt-xp-badge { background: #fa1a81cc; border-radius: 9999px; padding: 0.18em 0.98em; color: #fff; font-weight: 600; box-shadow: 0 2px 12px #fa1a8126; font-size: 1.1rem; }
+        .flirt-xp-bar-bg { background: #faf5fc42; border-radius: 9999px; height: 18px; width: 100%; overflow: hidden; }
+        .flirt-xp-bar { height: 100%; border-radius: 9999px; }
+        .flirt-xp-pop { margin-top: 0.22em; text-align: center; color: #fff0fc; text-shadow: 0 0 10px #fa1a81, 0 0 24px #fff0fc; animation: pop-scale 1.2s; }
+        @keyframes pop-scale { 0% { transform: scale(1); } 22% { transform: scale(1.22); } 57% { transform: scale(0.98); } 100% { transform: scale(1); } }
+        .sparkle { position: absolute; width: 5px; height: 5px; border-radius: 99px; background: linear-gradient(120deg, #fff0fc, #ffd1ec, #fa1a81 66%, #e098f8); opacity: 0.36; box-shadow: 0 0 11px 3px #ffd1eccc, 0 0 2px 1px #fff; animation: sparkle-pop 4.9s infinite cubic-bezier(0.62, -0.19, 0.7, 1.21); }
+        @keyframes sparkle-pop { 0% { opacity: 0.1; transform: scale(0.97); } 14% { opacity: 0.66; transform: scale(1.32); } 50% { opacity: 0.92; } 86% { opacity: 0.46); transform: scale(0.86); } 100% { opacity: 0.13; } }
+        .cupid-img { position: absolute; width: 108px; height: auto; z-index: 41; }
+        .cupid-left { top: 110px; left: 6vw; }
+        .cupid-right { top: 114px; right: 6vw; }
+        @keyframes arrow-fly-right { 0% { left: 11vw; opacity: 0; } 10% { left: 13vw; opacity: 1; } 87% { left: 74vw; opacity: 1; } 100% { left: 80vw; opacity: 0; } }
         .cupid-arrow { position: absolute; z-index: 24; }
-        .crush-title-animate {
-          animation: crush-title-bounce 1.32s cubic-bezier(0.58, -0.16, 0.6, 1.54) infinite;
-        }
-        @keyframes crush-title-bounce {
-          0%,100% { transform: scale(1); }
-          17% { transform: scale(1.08) rotate(-2deg); }
-          38% { transform: scale(0.97) rotate(3deg); }
-        }
+        .crush-title-animate { animation: crush-title-bounce 1.32s cubic-bezier(0.58, -0.16, 0.6, 1.54) infinite; }
+        @keyframes crush-title-bounce { 0%,100% { transform: scale(1); } 17% { transform: scale(1.08) rotate(-2deg); } 38% { transform: scale(0.97) rotate(3deg); } }
         .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
         .neon-tagline { color: #ffd1ec; text-shadow: 0 0 8px #fa1a81bb; }
-        .crush-title-heart {
-          font-size: 2.2em; display: inline-block;
-          animation: heart-pulse 1.7s infinite cubic-bezier(0.62, -0.29, 0.7, 1.41);
-        }
-        @keyframes heart-pulse {
-          0%,100% { transform: scale(1); }
-          28% { transform: scale(1.26); }
-          70% { transform: scale(1.09); }
-        }
+        .crush-title-heart { font-size: 2.2em; display: inline-block; animation: heart-pulse 1.7s infinite cubic-bezier(0.62, -0.29, 0.7, 1.41); }
+        @keyframes heart-pulse { 0%,100% { transform: scale(1); } 28% { transform: scale(1.26); } 70% { transform: scale(1.09); } }
         .chatbox-panel-wrapper { margin: 1.7rem 0 0.8rem 0; width: 99vw; max-width: 440px; }
 
         /* keyboard focus */
