@@ -452,6 +452,7 @@ export default function LeaderboardPage(){
       (process.env.NEXT_PUBLIC_SITE_URL ||
         (typeof window !== "undefined" && window.location?.origin) ||
         "").replace(/\/$/, "");
+
     const shareId =
       (me?.name && me.name.trim()) ||
       me?.wallet ||
@@ -463,17 +464,18 @@ export default function LeaderboardPage(){
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
-    // --- NEW: open X banner (1500x500) with stats overlaid
+    // --- Open X banner (1500x500) with stats overlaid (now passes custom bg)
     const bannerParams = new URLSearchParams({
       name: (me?.name || shareId || "Anonymous"),
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
+      bg: `${base}/brand/x-banner.jpg`, // <- ensure your banner in /public/brand/
     });
     const openBanner = () => {
       if (!shareId) return;
-      const path = `/api/x-banner/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
-      window.open(path, "_blank", "noopener,noreferrer");
+      const path = `/card/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
+window.open(path, "_blank", "noopener,noreferrer");
     };
 
     const copyShare = async () => {
@@ -542,7 +544,7 @@ export default function LeaderboardPage(){
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span className="lbl">Copy link</span>
             </button>
-            {/* CHANGED: Open the X banner generator instead of the profile */}
+            {/* Open the X banner generator */}
             <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareUrl} title="Open X banner">
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v12H4zM8 4h8v4H8zM9 10h6v6H9z"/></svg>
               <span className="lbl">Open card</span>
