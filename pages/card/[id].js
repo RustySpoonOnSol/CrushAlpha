@@ -97,6 +97,7 @@ export default function CardSharePage() {
         <meta name="twitter:title" content={`${title} — ${name}`} />
         <meta name="twitter:description" content={`${name} · ${tagline}`} />
         <meta name="twitter:image" content={`${SITE}${imgSrc}`} />
+        <link rel="preload" as="image" href={imgSrc} imagesrcset={`${imgSrc} 1500w`} />
       </Head>
 
       <main className="wrap">

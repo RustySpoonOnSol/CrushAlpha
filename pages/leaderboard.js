@@ -475,7 +475,7 @@ export default function LeaderboardPage(){
     const openBanner = () => {
       if (!shareId) return;
       const path = `/card/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
-window.open(path, "_blank", "noopener,noreferrer");
+      window.open(path, "_blank", "noopener,noreferrer");
     };
 
     const copyShare = async () => {
