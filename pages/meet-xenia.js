@@ -39,8 +39,8 @@ const VAULT = [
     blurb: "A little taste — no $CRUSH required.",
     minHold: 0,
     images: [
-      { src: "/xenia/free/free-01.jpg", alt: "Xenia — free teaser 1" },
-      { src: "/xenia/free/free-02.jpg", alt: "Xenia — free teaser 2" },
+      { src: "/xenia/free/free-01.png", alt: "Xenia — free teaser 1" },
+      { src: "/xenia/free/free-02.png", alt: "Xenia — free teaser 2" },
     ],
   },
 
@@ -85,9 +85,9 @@ const VAULT = [
     blurb: "Playful poses — perfect for your lockscreen.",
     minHold: CHAT_MIN_HOLD,
     images: [
-      { src: "/xenia/sfw/tease-01.jpg", alt: "Xenia — playful pose" },
-      { src: "/xenia/sfw/tease-02.jpg", alt: "Xenia — wink" },
-      { src: "/xenia/sfw/tease-03.jpg", alt: "Xenia — neon glow" },
+      { src: "/xenia/sfw/tease-01.png", alt: "Xenia — playful pose" },
+      { src: "/xenia/sfw/tease-02.png", alt: "Xenia — wink" },
+      { src: "/xenia/sfw/tease-03.png", alt: "Xenia — neon glow" },
     ],
   },
 
@@ -99,8 +99,8 @@ const VAULT = [
     blurb: "Unlocked by holding ≥ 1,000 $CRUSH.",
     minHold: 1000,
     images: [
-      { src: "/xenia/hold/h1-01.jpg", alt: "Xenia — 1k holders set 1" },
-      { src: "/xenia/hold/h1-02.jpg", alt: "Xenia — 1k holders set 2" },
+      { src: "/xenia/hold/h1-01.png", alt: "Xenia — 1k holders set 1" },
+      { src: "/xenia/hold/h1-02.png", alt: "Xenia — 1k holders set 2" },
     ],
   },
   {
@@ -110,8 +110,8 @@ const VAULT = [
     blurb: "Unlocked by holding ≥ 3,000 $CRUSH.",
     minHold: 3000,
     images: [
-      { src: "/xenia/hold/h3-01.jpg", alt: "Xenia — 3k holders set 1" },
-      { src: "/xenia/hold/h3-02.jpg", alt: "Xenia — 3k holders set 2" },
+      { src: "/xenia/hold/h3-01.png", alt: "Xenia — 3k holders set 1" },
+      { src: "/xenia/hold/h3-02.png", alt: "Xenia — 3k holders set 2" },
     ],
   },
   {
@@ -121,8 +121,8 @@ const VAULT = [
     blurb: "Unlocked by holding ≥ 7,000 $CRUSH.",
     minHold: 7000,
     images: [
-      { src: "/xenia/hold/h7-01.jpg", alt: "Xenia — 7k holders set 1" },
-      { src: "/xenia/hold/h7-02.jpg", alt: "Xenia — 7k holders set 2" },
+      { src: "/xenia/hold/h7-01.png", alt: "Xenia — 7k holders set 1" },
+      { src: "/xenia/hold/h7-02.png", alt: "Xenia — 7k holders set 2" },
     ],
   },
 
@@ -134,9 +134,9 @@ const VAULT = [
     blurb: "Exclusive set. Pay per-image to unlock, or hold enough $CRUSH for free access.",
     minHold: 0,
     images: [
-      { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.jpg", freeIfHold: 2000 },
-      { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 300, preview: "/xenia/nsfw/nsfw-02-blur.jpg", freeIfHold: 3000 },
-      { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 400, preview: "/xenia/nsfw/nsfw-03-blur.jpg", freeIfHold: 5000 },
+      { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.png", freeIfHold: 2000 },
+      { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 300, preview: "/xenia/nsfw/nsfw-02-blur.png", freeIfHold: 3000 },
+      { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 400, preview: "/xenia/nsfw/nsfw-03-blur.png", freeIfHold: 5000 },
     ],
   },
   {
@@ -146,9 +146,9 @@ const VAULT = [
     blurb: "Each photo can be unlocked individually with $CRUSH. Payments go to treasury.",
     minHold: 0,
     images: [
-      { id: "pp-02-1", title: "Photo A", priceCrush: 500, preview: "/xenia/pp/pp-01-blur.jpg" },
-      { id: "pp-02-2", title: "Photo B", priceCrush: 750, preview: "/xenia/pp/pp-02-blur.jpg", freeIfHold: 3500 },
-      { id: "pp-02-3", title: "Photo C", priceCrush: 1000, preview: "/xenia/pp/pp-03-blur.jpg" },
+      { id: "pp-02-1", title: "Photo A", priceCrush: 500, preview: "/xenia/pp/pp-01-blur.png" },
+      { id: "pp-02-2", title: "Photo B", priceCrush: 750, preview: "/xenia/pp/pp-02-blur.png", freeIfHold: 3500 },
+      { id: "pp-02-3", title: "Photo C", priceCrush: 1000, preview: "/xenia/pp/pp-03-blur.png" },
     ],
   },
 
@@ -521,7 +521,7 @@ export default function MeetXenia() {
 
         {/* PREVIEW DECOR */}
         <div className="w-full max-w-5xl mt-10 grid grid-cols-2 md:grid-cols-4 gap-4" aria-hidden="true">
-          {["/sfw/s1.jpg", "/sfw/s2.jpg", "/nsfw/n1_blur.jpg", "/nsfw/n2_blur.jpg"].map((src, i) => (
+          {["/sfw/s1.png", "/sfw/s2.png", "/nsfw/n1_blur.png", "/nsfw/n2_blur.png"].map((src, i) => (
             <div key={i} className="rounded-xl overflow-hidden border border-pink-300/30 bg-black/30">
               <img src={src} alt="" aria-hidden="true" loading="lazy" className={`w-full h-40 object-cover ${reducedMotion ? "" : "preview-pop"}`} />
             </div>

@@ -55,7 +55,7 @@ export default async function handler(req) {
     const center  = u.searchParams.get("center") === "1";     // center-align content
 
     const origin = u.origin;
-    const bgUrl  = u.searchParams.get("bg") || `${origin}/brand/x-banner.jpg`;
+    const bgUrl  = u.searchParams.get("bg") || `${origin}/brand/x-banner.png`;
 
     // Optional fonts (safe to fail)
     const [inter800, inter700] = await Promise.all([

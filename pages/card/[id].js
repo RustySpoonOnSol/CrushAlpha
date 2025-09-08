@@ -32,7 +32,7 @@ export default function CardSharePage() {
   const center = q.center;
   const compact = q.compact;
   const wm = q.wm;
-  const bg = q.bg || `${SITE}/brand/x-banner.jpg`;
+  const bg = q.bg || `${SITE}/brand/x-banner.png`;
 
   const imgParams = buildQueryFrom({ name, xp, rank, pct, title, tagline, s, center, compact, wm, bg });
   const imgSrc = `/api/x-banner/${encodeURIComponent(id || "anon")}?${imgParams}`;

@@ -84,7 +84,7 @@ export default function UserShare({ id, user, rank, percentile }) {
     xp: String(user.xp || 0),
     rank: String(rank),
     pct: `Top ${percentile}%`,
-    bg: `${base}/brand/x-banner.jpg`,
+    bg: `${base}/brand/x-banner.png`,
   }).toString();
   const ogImage = base
     ? `${base}/api/x-banner/${encodeURIComponent(id)}?${bannerQS}`

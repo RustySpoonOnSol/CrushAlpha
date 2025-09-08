@@ -560,7 +560,7 @@ export default function LeaderboardPage(){
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
-      bg: `${base}/brand/x-banner.jpg`, // ensure your banner exists in /public/brand/x-banner.jpg
+      bg: `${base}/brand/x-banner.png`, // ensure your banner exists in /public/brand/x-banner.png
     });
     const openBanner = () => {
       if (!shareId) return;
