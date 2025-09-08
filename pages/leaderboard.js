@@ -349,6 +349,7 @@ export default function LeaderboardPage(){
     }
   }, [allFlirts, myIdentifier, nameDraft, initialName]);
 
+  // Availability: Supabase first (truth), then fallback to in-memory list
   const availReqIdRef = useRef(0);
   useEffect(()=>{
     if(!myIdentifier) return;
@@ -363,9 +364,21 @@ export default function LeaderboardPage(){
       try{
         setAvailState("checking");
         const target = canon(cleaned);
-        const takenByOther = (allFlirts || []).some(
-          (r) => r.wallet !== myIdentifier && canon(r.name) === target
-        );
+
+        // DB check first
+        let takenByOther = false;
+        if (HAS_SUPABASE) {
+          const owner = await getNameOwner(cleaned);
+          takenByOther = !!owner && owner !== myIdentifier;
+        }
+
+        // Fallback to local list if DB says free (covers preview/demo)
+        if (!takenByOther) {
+          takenByOther = (allFlirts || []).some(
+            (r) => r.wallet !== myIdentifier && canon(r.name) === target
+          );
+        }
+
         if (availReqIdRef.current !== id) return;
         setAvailState(takenByOther ? "taken" : "available");
       }catch(e){
@@ -379,7 +392,7 @@ export default function LeaderboardPage(){
     return ()=>clearTimeout(t);
   },[nameDraft,myIdentifier,initialName,allFlirts]);
 
-  function saveName(){
+  async function saveName(){
     if(!myIdentifier){ setNameMsg("Connect a wallet or open chat first."); return; }
     const cleaned = cleanName(nameDraft);
     const msg = isInvalidName(cleaned);
@@ -389,9 +402,21 @@ export default function LeaderboardPage(){
     setNameSaving(true); setNameMsg("");
     try{
       const target = canon(cleaned);
-      const takenByOther = (allFlirts || []).some(
-        (r) => r.wallet !== myIdentifier && canon(r.name) === target
-      );
+
+      // Double-check availability against DB
+      let takenByOther = false;
+      if (HAS_SUPABASE) {
+        const owner = await getNameOwner(cleaned);
+        takenByOther = !!owner && owner !== myIdentifier;
+      }
+
+      // Also check current list as a fallback
+      if (!takenByOther) {
+        takenByOther = (allFlirts || []).some(
+          (r) => r.wallet !== myIdentifier && canon(r.name) === target
+        );
+      }
+
       if (takenByOther) {
         setAvailState("taken");
         setNameMsg("Name is already taken.");
@@ -399,13 +424,24 @@ export default function LeaderboardPage(){
         return;
       }
 
-      // Bind name to this identity
+      // Bind name to this identity (local)
       localStorage.setItem(LS_DISPLAY_NAME_KEY, cleaned);
       localStorage.setItem(LS_NAME_OWNER_KEY, myIdentifier);
       setStoredDisplayName(cleaned);
 
+      // Update UI lists
       setAllFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
       setFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
+
+      // Upsert to Supabase immediately (authoritative)
+      if (HAS_SUPABASE) {
+        try {
+          await supabase.from("leaderboard").upsert(
+            { wallet: myIdentifier, name: cleaned, updated_at: new Date() },
+            { onConflict: "wallet" }
+          );
+        } catch (_) {}
+      }
 
       setAvailState("available");
       setInitialName(cleaned);
