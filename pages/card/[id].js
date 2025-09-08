@@ -1,5 +1,5 @@
-// pages/card/[id].js  — Vercel OG card (experimental-edge)
-import { ImageResponse } from "@vercel/og";
+// pages/card/[id].js — OG card on experimental-edge (no @vercel/og, no wasm setup)
+import { ImageResponse } from "next/server";
 export const config = { runtime: "experimental-edge" };
 
 /* ---- helpers ---- */
@@ -33,11 +33,12 @@ export default async function handler(req) {
   try {
     const u = new URL(req.url);
     const id = decodeURIComponent(u.pathname.split("/").pop() || "");
-    const title   = u.searchParams.get("title") || "Crush AI";
-    const name    = u.searchParams.get("name")  || id || "Anonymous";
+
+    const title   = u.searchParams.get("title")   || "Crush AI";
+    const name    = u.searchParams.get("name")    || id || "Anonymous";
     const xp      = Number(u.searchParams.get("xp") || "0");
-    const rank    = u.searchParams.get("rank") || "?";
-    const pct     = u.searchParams.get("pct")  || "Top 100%";
+    const rank    = u.searchParams.get("rank")    || "?";
+    const pct     = u.searchParams.get("pct")     || "Top 100%";
     const tagline = u.searchParams.get("tagline") || "Chat. Flirt. Climb.";
     const hideWm  = u.searchParams.get("wm") === "0";
     const origin  = u.origin;
