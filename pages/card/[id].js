@@ -1,25 +1,8 @@
-// pages/card/[id].js  (Edge)
-// Generates a 1500x500 share card with a PNG background from /public/brand/x-banner.png
-import { ImageResponse } from "next/server";
-export const config = { runtime: "edge" };
+// pages/card/[id].js  — Vercel OG card (experimental-edge)
+import { ImageResponse } from "@vercel/og";
+export const config = { runtime: "experimental-edge" };
 
-/* ---------------- helpers (edge-safe) ---------------- */
-async function loadFontFrom(candidates) {
-  for (const url of candidates) {
-    try {
-      const res = await fetch(url, { cache: "force-cache" });
-      if (!res.ok) continue;
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      if (!ct || ct.includes("text/html")) continue;
-      const ab = await res.arrayBuffer();
-      const head = new TextDecoder().decode(new Uint8Array(ab).slice(0, 8));
-      if (head.startsWith("<!DO") || head.startsWith("<html")) continue;
-      return ab;
-    } catch {}
-  }
-  return null;
-}
-
+/* ---- helpers ---- */
 async function toDataURL(url) {
   try {
     const res = await fetch(url, { cache: "force-cache" });
@@ -36,221 +19,105 @@ async function toDataURL(url) {
     return null;
   }
 }
-
-// Try a list of candidates and return the first valid data URL
-async function firstImageDataURL(urls) {
+async function firstDataUrl(urls) {
   for (const u of urls) {
     if (!u) continue;
-    const data = await toDataURL(u);
-    if (data) return data;
+    const d = await toDataURL(u);
+    if (d) return d;
   }
   return null;
 }
 
-/* ---------------- route ---------------- */
+/* ---- route ---- */
 export default async function handler(req) {
   try {
     const u = new URL(req.url);
-    const id = decodeURIComponent(u.pathname.split("/").pop() || "").trim() || "anon";
-
-    // Query (optional)
+    const id = decodeURIComponent(u.pathname.split("/").pop() || "");
     const title   = u.searchParams.get("title") || "Crush AI";
-    const name    = u.searchParams.get("name")  || id;
+    const name    = u.searchParams.get("name")  || id || "Anonymous";
     const xp      = Number(u.searchParams.get("xp") || "0");
     const rank    = u.searchParams.get("rank") || "?";
     const pct     = u.searchParams.get("pct")  || "Top 100%";
     const tagline = u.searchParams.get("tagline") || "Chat. Flirt. Climb.";
     const hideWm  = u.searchParams.get("wm") === "0";
-    const manualScale = Math.max(0.6, Math.min(1.2, Number(u.searchParams.get("s") || "1")));
-    const compact = u.searchParams.get("compact") === "1";
-    const center  = u.searchParams.get("center") === "1";
+    const origin  = u.origin;
 
-    const origin = u.origin;
-
-    // Robust PNG-only candidates (no cross-origin dependency needed)
-    const bgCandidates = [
-      u.searchParams.get("bg"),                 // if explicitly passed
-      `${origin}/brand/x-banner.png`,           // canonical
-      `${origin}/images/x-banner.png`,          // fallback folder
-      `${origin}/x-banner.png`,                 // root fallback
-    ];
-    const bgData = await firstImageDataURL(bgCandidates);
-
-    // Optional fonts
-    const [inter800, inter700] = await Promise.all([
-      loadFontFrom([
-        `${origin}/fonts/Inter-ExtraBold.woff`,
-        `${origin}/fonts/Inter-Bold.woff`,
-        "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.5/files/inter-latin-800-normal.woff",
-      ]),
-      loadFontFrom([
-        `${origin}/fonts/Inter-SemiBold.woff`,
-        "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.5/files/inter-latin-700-normal.woff",
-      ]),
+    // Same-origin PNG banner (with fallbacks)
+    const bg = await firstDataUrl([
+      u.searchParams.get("bg"),
+      `${origin}/brand/x-banner.png`,
+      `${origin}/images/x-banner.png`,
+      `${origin}/x-banner.png`,
     ]);
 
-    // Canvas dims
     const W = 1500, H = 500;
-
-    // Auto-scale for long names
-    const len = (name || "").length;
-    let autoScale = 1.0;
-    if (len > 22) autoScale = 0.9;
-    if (len > 28) autoScale = 0.82;
-    if (len > 34) autoScale = 0.74;
-    if (len > 42) autoScale = 0.68;
-    const SCALE = Math.max(0.62, Math.min(1.1, autoScale * manualScale));
-
-    // Sizes
-    const TITLE_SIZE = Math.round((compact ? 76 : 86) * SCALE);
-    const NAME_SIZE  = Math.round((compact ? 62 : 70) * SCALE);
-    const CHIP_FS    = Math.max(24, Math.round((compact ? 30 : 34) * SCALE));
-    const CHIP_PAD_V = Math.max(9,  Math.round((compact ? 10 : 12) * SCALE));
-    const CHIP_PAD_H = Math.max(14, Math.round((compact ? 16 : 20) * SCALE));
-    const CHIP_BORDER = Math.max(2, Math.round((compact ? 3 : 3.5) * SCALE));
-
-    const SAFE_X = 60;
-    const PAD_LEFT = center ? 420 : 520;
-    const CONTENT_GAP = Math.round((compact ? 14 : 18) * SCALE);
-    const CHIPS_GAP   = Math.round((compact ? 18 : 22) * SCALE);
-
-    const chip = {
-      display: "flex",
-      alignItems: "baseline",
-      gap: Math.max(10, Math.round((compact ? 10 : 12) * SCALE)),
-      padding: `${CHIP_PAD_V}px ${CHIP_PAD_H}px`,
-      borderRadius: 999,
-      border: `${CHIP_BORDER}px solid rgba(255,255,255,0.30)`,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.16), rgba(15,15,18,0.33))",
-      boxShadow:
-        "0 14px 34px rgba(0,0,0,0.42), inset 0 1px 6px rgba(255,255,255,0.20), inset 0 -14px 24px rgba(0,0,0,0.30)",
-      color: "#fff",
-      fontWeight: 800,
-      fontSize: CHIP_FS,
-      textShadow: "0 2px 10px rgba(0,0,0,0.5)",
-      whiteSpace: "nowrap",
-    };
 
     return new ImageResponse(
       (
-        <div style={{ width: "100%", height: "100%", display: "flex", position: "relative", backgroundColor: "#0b0512" }}>
-          {/* Background image */}
-          {bgData ? (
+        <div style={{ width: W, height: H, position: "relative", display: "flex", backgroundColor:"#0b0512" }}>
+          {bg && (
             <img
-              src={bgData}
+              src={bg}
               width={W}
               height={H}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+              style={{ position:"absolute", inset:0, objectFit:"cover" }}
             />
-          ) : null}
+          )}
 
-          {/* Overlays */}
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "linear-gradient(90deg, rgba(0,0,0,0.48) 0%, rgba(0,0,0,0.30) 40%, rgba(0,0,0,0.18) 100%)"
-          }} />
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "radial-gradient(circle at 60% 50%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 62%)"
-          }} />
+          <div style={{ position:"absolute", inset:0,
+                        background:"linear-gradient(90deg, rgba(0,0,0,.48), rgba(0,0,0,.18))" }} />
 
-          {/* Content */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              alignItems: center ? "center" : "flex-start",
-              padding: center ? `${SAFE_X}px ${SAFE_X}px` : `40px ${SAFE_X}px 40px ${PAD_LEFT}px`,
-              width: "100%",
-              height: "100%",
-              color: "#fff",
-              gap: CONTENT_GAP,
-            }}
-          >
-            {/* Title */}
-            <div style={{
-              fontSize: TITLE_SIZE,
-              fontWeight: 800,
-              lineHeight: 1.08,
-              letterSpacing: 0.2,
-              textShadow: "0 1px 0 #000, 0 12px 34px rgba(250,26,129,0.28), 0 6px 24px rgba(181,126,255,0.26)",
-              whiteSpace: "nowrap",
-            }}>
+          <div style={{
+            display:"flex", flexDirection:"column", justifyContent:"center",
+            padding:"40px 60px 40px 520px", width:"100%", color:"#fff", gap:18
+          }}>
+            <div style={{ fontSize:86, fontWeight:800, textShadow:"0 1px 0 #000, 0 12px 34px rgba(250,26,129,.28)" }}>
               {title}
             </div>
-
-            {/* Accent bar */}
             <div style={{
-              height: Math.max(5, Math.round(6 * SCALE)),
-              width: Math.round(260 * SCALE),
-              borderRadius: 999,
-              marginTop: Math.round(6 * SCALE),
-              background: "linear-gradient(90deg, #ff51b3, #b57eff, #b5fffc)",
-              opacity: 0.55,
-              boxShadow: "0 6px 20px rgba(181,126,255,0.35)",
+              height:6, width:260, borderRadius:999,
+              background:"linear-gradient(90deg,#ff51b3,#b57eff,#b5fffc)",
+              opacity:.55, boxShadow:"0 6px 20px rgba(181,126,255,.35)"
             }} />
-
-            {/* Name */}
-            <div style={{
-              fontSize: NAME_SIZE,
-              fontWeight: 800,
-              lineHeight: 1.06,
-              textShadow: "0 1px 0 #000, 0 10px 30px rgba(0,0,0,0.45)",
-              maxWidth: 900,
-            }}>
+            <div style={{ fontSize:70, fontWeight:800, textShadow:"0 1px 0 #000, 0 10px 30px rgba(0,0,0,.45)" }}>
               {name}
             </div>
-
-            {/* Chips */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: CHIPS_GAP, maxWidth: 1100 }}>
-              <div style={chip}><span style={{ opacity: 0.78 }}>XP:</span><span style={{ fontWeight: 900 }}>{xp.toLocaleString()}</span></div>
-              <div style={chip}><span style={{ opacity: 0.78 }}>Rank:</span><span style={{ fontWeight: 900 }}>#{rank}</span></div>
-              <div style={chip}><span style={{ opacity: 0.78 }}>Percentile:</span><span style={{ fontWeight: 900 }}>{pct}</span></div>
+            <div style={{ display:"flex", gap:22 }}>
+              {[
+                ["XP:", xp.toLocaleString()],
+                ["Rank:", `#${rank}`],
+                ["Percentile:", pct],
+              ].map(([k,v]) => (
+                <div key={k} style={{
+                  display:"flex", gap:12, padding:"12px 20px", borderRadius:999,
+                  border:"3px solid rgba(255,255,255,.30)",
+                  background:"linear-gradient(180deg, rgba(255,255,255,.16), rgba(15,15,18,.33))",
+                  boxShadow:"0 14px 34px rgba(0,0,0,.42), inset 0 1px 6px rgba(255,255,255,.20), inset 0 -14px 24px rgba(0,0,0,.30)",
+                  fontWeight:800, fontSize:34
+                }}>
+                  <span style={{ opacity:.78 }}>{k}</span><span style={{ fontWeight:900 }}>{v}</span>
+                </div>
+              ))}
             </div>
-
-            {/* Tagline */}
-            <div style={{
-              marginTop: Math.round(6 * SCALE),
-              fontSize: Math.round(34 * SCALE),
-              fontWeight: 900,
-              opacity: 0.98,
-              textShadow: "0 1px 0 #000, 0 8px 26px rgba(0,0,0,0.45)",
-            }}>
+            <div style={{ fontSize:34, fontWeight:900, textShadow:"0 1px 0 #000, 0 8px 26px rgba(0,0,0,.45)" }}>
               {tagline}
             </div>
           </div>
 
-          {/* Watermark */}
           {!hideWm && (
-            <div style={{ position: "absolute", right: 28, bottom: 22, display: "flex", alignItems: "center" }}>
-              <div style={{
-                padding: "8px 14px",
-                borderRadius: 999,
-                border: "1.6px solid rgba(255, 85, 170, 0.55)",
-                background: "linear-gradient(180deg, rgba(255, 120, 195, 0.18), rgba(0,0,0,0.24))",
-                boxShadow: "0 8px 18px rgba(0,0,0,0.32), 0 0 18px rgba(255, 85, 170, 0.35), inset 0 1px 6px rgba(255,255,255,0.18)",
-                fontSize: 20,
-                fontWeight: 900,
-                letterSpacing: 0.4,
-                color: "#ff51b3",
-                textShadow: "0 1px 0 #000, 0 0 10px rgba(255, 81, 179, 0.55), 0 0 18px rgba(255, 81, 179, 0.35)",
-                opacity: 0.98,
-              }}>
-                crushai.fun
-              </div>
+            <div style={{
+              position:"absolute", right:28, bottom:22, padding:"8px 14px",
+              borderRadius:999, border:"1.6px solid rgba(255,85,170,.55)",
+              background:"linear-gradient(180deg, rgba(255,120,195,.18), rgba(0,0,0,.24))",
+              boxShadow:"0 8px 18px rgba(0,0,0,.32), 0 0 18px rgba(255,85,170,.35), inset 0 1px 6px rgba(255,255,255,.18)",
+              color:"#ff51b3", fontWeight:900, letterSpacing:.4, fontSize:20
+            }}>
+              crushai.fun
             </div>
           )}
         </div>
       ),
-      {
-        width: W,
-        height: H,
-        fonts: [
-          inter800 && { name: "Inter", data: inter800, weight: 800, style: "normal" },
-          inter700 && { name: "Inter", data: inter700, weight: 700, style: "normal" },
-        ].filter(Boolean),
-      }
+      { width: W, height: H }
     );
   } catch (e) {
     return new Response(`OG error: ${e.message}`, { status: 500 });
