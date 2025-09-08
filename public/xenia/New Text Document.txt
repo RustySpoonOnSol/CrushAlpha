@@ -1,0 +1,65 @@
+Put these under /public so they can be shown before unlock:
+
+/public/xenia/free/free-01.jpg
+
+/public/xenia/free/free-02.jpg
+
+/public/xenia/sfw/tease-01.jpg
+
+/public/xenia/sfw/tease-02.jpg
+
+/public/xenia/sfw/tease-03.jpg
+
+/public/xenia/hold/h1-01.jpg
+
+/public/xenia/hold/h1-02.jpg
+
+/public/xenia/hold/h3-01.jpg
+
+/public/xenia/hold/h3-02.jpg
+
+/public/xenia/hold/h7-01.jpg
+
+/public/xenia/hold/h7-02.jpg
+
+/public/xenia/nsfw/nsfw-01-blur.jpg
+
+/public/xenia/nsfw/nsfw-02-blur.jpg
+
+/public/xenia/nsfw/nsfw-03-blur.jpg
+
+/public/xenia/pp/pp-01-blur.jpg
+
+/public/xenia/pp/pp-02-blur.jpg
+
+/public/xenia/pp/pp-03-blur.jpg
+
+Full-res (served only after unlock)
+
+Put these under /protected/xenia/vip (never in /public):
+
+/protected/xenia/vip/vip-01.jpg
+
+/protected/xenia/vip/vip-02.jpg
+
+/protected/xenia/vip/vip-03.jpg
+
+/protected/xenia/vip/pp-01.jpg
+
+/protected/xenia/vip/pp-02.jpg
+
+/protected/xenia/vip/pp-03.jpg
+
+Pay-item ID ⇄ preview ⇄ full-res map (for sanity)
+
+vip-gallery-01-1 → /xenia/nsfw/nsfw-01-blur.jpg → vip-01.jpg
+
+vip-gallery-01-2 → /xenia/nsfw/nsfw-02-blur.jpg → vip-02.jpg
+
+vip-gallery-01-3 → /xenia/nsfw/nsfw-03-blur.jpg → vip-03.jpg
+
+pp-02-1 → /xenia/pp/pp-01-blur.jpg → pp-01.jpg
+
+pp-02-2 → /xenia/pp/pp-02-blur.jpg → pp-02.jpg
+
+pp-02-3 → /xenia/pp/pp-03-blur.jpg → pp-03.jpg
