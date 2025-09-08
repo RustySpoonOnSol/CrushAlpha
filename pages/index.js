@@ -545,10 +545,6 @@ export default function Home() {
       <Head>
         <title>Crush AI 💘</title>
 
-        {/* Preload hero images so cupids appear instantly (PNG-only, /images/) */}
-        <link rel="preload" as="image" href="/images/cupid_female.png" />
-        <link rel="preload" as="image" href="/images/cupid_male.png" />
-
         {/* Social (X/Twitter + OG) - absolute URL to /brand/x-banner.png */}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:site" content="@CrushAIx" />
@@ -557,6 +553,14 @@ export default function Home() {
         <meta property="og:image" content={abs("/brand/x-banner.png")} />
         <meta name="twitter:image" content={abs("/brand/x-banner.png")} />
       </Head>
+
+      {/* Dynamic preloads that exactly match the URLs <img> will use */}
+      {mounted && (
+        <Head>
+          <link rel="preload" as="image" href={cupidLeftSrc} />
+          <link rel="preload" as="image" href={cupidRightSrc} />
+        </Head>
+      )}
 
       {/* Floating Emoji Layer */}
       {mounted && (
@@ -577,6 +581,7 @@ export default function Home() {
       <div style={{ position: "fixed", width: "100%", left: 0, top: 0, pointerEvents: "none", zIndex: 40 }}>
         <img
           src={cupidLeftSrc}
+          fetchpriority="high"
           alt=""
           aria-hidden="true"
           className="cupid-img cupid-left"
@@ -587,6 +592,7 @@ export default function Home() {
         />
         <img
           src={cupidRightSrc}
+          fetchpriority="high"
           alt=""
           aria-hidden="true"
           className="cupid-img cupid-right"
@@ -955,7 +961,7 @@ export default function Home() {
           14% { transform: scale(1.23) rotate(9deg); }
           23% { transform: scale(1.08) rotate(-2deg); }
           32% { transform: scale(1) rotate(2deg); }
-          70% { transform: scale(1.13) rotate(0deg); }
+          70% { transform: scale(1.13) rotate(0); }
         }
         .lips-emoji-animate { animation: lips-bounce 1.8s infinite cubic-bezier(0.32, -0.29, 0.7, 1.41); }
         @keyframes lips-bounce {
@@ -983,7 +989,7 @@ export default function Home() {
         .flirt-xp-pop { margin-top: 0.22em; text-align: center; color: #fff0fc; text-shadow: 0 0 10px #fa1a81, 0 0 24px #fff0fc; animation: pop-scale 1.2s; }
         @keyframes pop-scale { 0% { transform: scale(1); } 22% { transform: scale(1.22); } 57% { transform: scale(0.98); } 100% { transform: scale(1); } }
         .sparkle { position: absolute; width: 5px; height: 5px; border-radius: 99px; background: linear-gradient(120deg, #fff0fc, #ffd1ec, #fa1a81 66%, #e098f8); opacity: 0.36; box-shadow: 0 0 11px 3px #ffd1eccc, 0 0 2px 1px #fff; animation: sparkle-pop 4.9s infinite cubic-bezier(0.62, -0.19, 0.7, 1.21); }
-        @keyframes sparkle-pop { 0% { opacity: 0.1; transform: scale(0.97); } 14% { opacity: 0.66; transform: scale(1.32); } 50% { opacity: 0.92; } 86% { opacity: 0.46); transform: scale(0.86); } 100% { opacity: 0.13; } }
+        @keyframes sparkle-pop { 0% { opacity: 0.1; transform: scale(0.97); } 14% { opacity: 0.66; transform: scale(1.32); } 50% { opacity: 0.92); } 86% { opacity: 0.46); transform: scale(0.86); } 100% { opacity: 0.13; } }
         .cupid-img { position: absolute; width: 108px; height: auto; z-index: 41; }
         .cupid-left { top: 110px; left: 6vw; }
         .cupid-right { top: 114px; right: 6vw; }
