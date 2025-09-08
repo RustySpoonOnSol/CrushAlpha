@@ -554,13 +554,13 @@ export default function LeaderboardPage(){
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
-    // --- Open X banner (1500x500) with stats overlaid (custom bg)
+    // --- Open X banner (1500x500) with stats overlaid; same-origin PNG banner
     const bannerParams = new URLSearchParams({
       name: (me?.name || shareId || "Anonymous"),
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
-      bg: `${base}/brand/x-banner.png`, // ensure your banner exists in /public/brand/x-banner.png
+      bg: `${base}/brand/x-banner.png`, // /public/brand/x-banner.png
     });
     const openBanner = () => {
       if (!shareId) return;

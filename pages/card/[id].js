@@ -1,194 +1,258 @@
-// src/pages/card/[id].js
-import Head from "next/head";
-import { useRouter } from "next/router";
-import { useEffect, useMemo, useState } from "react";
+// pages/card/[id].js  (Edge)
+// Generates a 1500x500 share card with a PNG background from /public/brand/x-banner.png
+import { ImageResponse } from "next/server";
+export const config = { runtime: "edge" };
 
-const SITE =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (typeof window !== "undefined" ? window.location.origin : "https://example.com");
-
-function buildQueryFrom(obj) {
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(obj)) {
-    if (v == null || v === "") continue;
-    p.set(k, String(v));
+/* ---------------- helpers (edge-safe) ---------------- */
+async function loadFontFrom(candidates) {
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { cache: "force-cache" });
+      if (!res.ok) continue;
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (!ct || ct.includes("text/html")) continue;
+      const ab = await res.arrayBuffer();
+      const head = new TextDecoder().decode(new Uint8Array(ab).slice(0, 8));
+      if (head.startsWith("<!DO") || head.startsWith("<html")) continue;
+      return ab;
+    } catch {}
   }
-  return p.toString();
+  return null;
 }
 
-export default function CardSharePage() {
-  const router = useRouter();
-  const { id } = router.query;
-
-  // read query params (pass-through to the image)
-  const q = router.query || {};
-  const name = (q.name || id || "anon").toString();
-  const xp = q.xp || "0";
-  const rank = q.rank || "?";
-  const pct = q.pct || "Top 100%";
-  const title = q.title || "Crush AI";
-  const tagline = q.tagline || "Chat. Flirt. Climb.";
-  const s = q.s;
-  const center = q.center;
-  const compact = q.compact;
-  const wm = q.wm;
-  const bg = q.bg || `${SITE}/brand/x-banner.png`;
-
-  const imgParams = buildQueryFrom({ name, xp, rank, pct, title, tagline, s, center, compact, wm, bg });
-  const imgSrc = `/api/x-banner/${encodeURIComponent(id || "anon")}?${imgParams}`;
-  const pageUrl = useMemo(() => (typeof window !== "undefined" ? window.location.href : `${SITE}/card/${id}?${imgParams}`), [id, imgParams]);
-
-  const [copied, setCopied] = useState("");
-
-  async function copy(text, label) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(label || "Copied!");
-      setTimeout(() => setCopied(""), 1200);
-    } catch {
-      setCopied("Press Ctrl/Cmd+C to copy");
-      setTimeout(() => setCopied(""), 1600);
-    }
+async function toDataURL(url) {
+  try {
+    const res = await fetch(url, { cache: "force-cache" });
+    if (!res.ok) return null;
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.startsWith("image/")) return null;
+    const ab = await res.arrayBuffer();
+    let bin = "";
+    const bytes = new Uint8Array(ab);
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const b64 = btoa(bin);
+    return `data:${ct};base64,${b64}`;
+  } catch {
+    return null;
   }
+}
 
-  const shareX = () => {
-    const text = `$CRUSH ${name} — Rank #${rank} (${Number(xp || 0).toLocaleString()} XP)`;
-    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(pageUrl)}&hashtags=CrushAI,Solana`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
+// Try a list of candidates and return the first valid data URL
+async function firstImageDataURL(urls) {
+  for (const u of urls) {
+    if (!u) continue;
+    const data = await toDataURL(u);
+    if (data) return data;
+  }
+  return null;
+}
 
-  const shareNative = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `${title} — ${name}`, url: pageUrl, text: `${name} · ${tagline}` });
-      } catch {}
-    } else {
-      copy(pageUrl, "Link copied");
-    }
-  };
+/* ---------------- route ---------------- */
+export default async function handler(req) {
+  try {
+    const u = new URL(req.url);
+    const id = decodeURIComponent(u.pathname.split("/").pop() || "").trim() || "anon";
 
-  const downloadPng = async () => {
-    try {
-      const res = await fetch(imgSrc, { cache: "no-store" });
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${name}-crush-card.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(a.href);
-    } catch {
-      copy(imgSrc, "Image URL copied");
-    }
-  };
+    // Query (optional)
+    const title   = u.searchParams.get("title") || "Crush AI";
+    const name    = u.searchParams.get("name")  || id;
+    const xp      = Number(u.searchParams.get("xp") || "0");
+    const rank    = u.searchParams.get("rank") || "?";
+    const pct     = u.searchParams.get("pct")  || "Top 100%";
+    const tagline = u.searchParams.get("tagline") || "Chat. Flirt. Climb.";
+    const hideWm  = u.searchParams.get("wm") === "0";
+    const manualScale = Math.max(0.6, Math.min(1.2, Number(u.searchParams.get("s") || "1")));
+    const compact = u.searchParams.get("compact") === "1";
+    const center  = u.searchParams.get("center") === "1";
 
-  return (
-    <>
-      <Head>
-        <title>{`${title} — ${name}`}</title>
-        <meta name="description" content={`${name} · ${tagline}`} />
-        {/* Make this page share beautifully anywhere */}
-        <meta property="og:title" content={`${title} — ${name}`} />
-        <meta property="og:description" content={`${name} · ${tagline}`} />
-        <meta property="og:image" content={`${SITE}${imgSrc}`} />
-        <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={`${title} — ${name}`} />
-        <meta name="twitter:description" content={`${name} · ${tagline}`} />
-        <meta name="twitter:image" content={`${SITE}${imgSrc}`} />
-        <link rel="preload" as="image" href={imgSrc} imagesrcset={`${imgSrc} 1500w`} />
-      </Head>
+    const origin = u.origin;
 
-      <main className="wrap">
-        <div className="card">
-          <img src={imgSrc} alt={`${name} share card`} className="preview" />
-          <div className="actions" role="group" aria-label="Share actions">
-            <button className="btn btn-x" onClick={shareX} title="Share on X">Share on X</button>
-            <button className="btn" onClick={() => copy(pageUrl, "Link copied")} title="Copy page link">Copy page link</button>
-            <button className="btn" onClick={() => copy(imgSrc, "Image URL copied")} title="Copy image URL">Copy image URL</button>
-            <button className="btn btn-primary" onClick={downloadPng} title="Download PNG">Download PNG</button>
-            <button className="btn" onClick={shareNative} title="Share via device">Share…</button>
+    // Robust PNG-only candidates (no cross-origin dependency needed)
+    const bgCandidates = [
+      u.searchParams.get("bg"),                 // if explicitly passed
+      `${origin}/brand/x-banner.png`,           // canonical
+      `${origin}/images/x-banner.png`,          // fallback folder
+      `${origin}/x-banner.png`,                 // root fallback
+    ];
+    const bgData = await firstImageDataURL(bgCandidates);
+
+    // Optional fonts
+    const [inter800, inter700] = await Promise.all([
+      loadFontFrom([
+        `${origin}/fonts/Inter-ExtraBold.woff`,
+        `${origin}/fonts/Inter-Bold.woff`,
+        "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.5/files/inter-latin-800-normal.woff",
+      ]),
+      loadFontFrom([
+        `${origin}/fonts/Inter-SemiBold.woff`,
+        "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.5/files/inter-latin-700-normal.woff",
+      ]),
+    ]);
+
+    // Canvas dims
+    const W = 1500, H = 500;
+
+    // Auto-scale for long names
+    const len = (name || "").length;
+    let autoScale = 1.0;
+    if (len > 22) autoScale = 0.9;
+    if (len > 28) autoScale = 0.82;
+    if (len > 34) autoScale = 0.74;
+    if (len > 42) autoScale = 0.68;
+    const SCALE = Math.max(0.62, Math.min(1.1, autoScale * manualScale));
+
+    // Sizes
+    const TITLE_SIZE = Math.round((compact ? 76 : 86) * SCALE);
+    const NAME_SIZE  = Math.round((compact ? 62 : 70) * SCALE);
+    const CHIP_FS    = Math.max(24, Math.round((compact ? 30 : 34) * SCALE));
+    const CHIP_PAD_V = Math.max(9,  Math.round((compact ? 10 : 12) * SCALE));
+    const CHIP_PAD_H = Math.max(14, Math.round((compact ? 16 : 20) * SCALE));
+    const CHIP_BORDER = Math.max(2, Math.round((compact ? 3 : 3.5) * SCALE));
+
+    const SAFE_X = 60;
+    const PAD_LEFT = center ? 420 : 520;
+    const CONTENT_GAP = Math.round((compact ? 14 : 18) * SCALE);
+    const CHIPS_GAP   = Math.round((compact ? 18 : 22) * SCALE);
+
+    const chip = {
+      display: "flex",
+      alignItems: "baseline",
+      gap: Math.max(10, Math.round((compact ? 10 : 12) * SCALE)),
+      padding: `${CHIP_PAD_V}px ${CHIP_PAD_H}px`,
+      borderRadius: 999,
+      border: `${CHIP_BORDER}px solid rgba(255,255,255,0.30)`,
+      background: "linear-gradient(180deg, rgba(255,255,255,0.16), rgba(15,15,18,0.33))",
+      boxShadow:
+        "0 14px 34px rgba(0,0,0,0.42), inset 0 1px 6px rgba(255,255,255,0.20), inset 0 -14px 24px rgba(0,0,0,0.30)",
+      color: "#fff",
+      fontWeight: 800,
+      fontSize: CHIP_FS,
+      textShadow: "0 2px 10px rgba(0,0,0,0.5)",
+      whiteSpace: "nowrap",
+    };
+
+    return new ImageResponse(
+      (
+        <div style={{ width: "100%", height: "100%", display: "flex", position: "relative", backgroundColor: "#0b0512" }}>
+          {/* Background image */}
+          {bgData ? (
+            <img
+              src={bgData}
+              width={W}
+              height={H}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : null}
+
+          {/* Overlays */}
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "linear-gradient(90deg, rgba(0,0,0,0.48) 0%, rgba(0,0,0,0.30) 40%, rgba(0,0,0,0.18) 100%)"
+          }} />
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "radial-gradient(circle at 60% 50%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 62%)"
+          }} />
+
+          {/* Content */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: center ? "center" : "flex-start",
+              padding: center ? `${SAFE_X}px ${SAFE_X}px` : `40px ${SAFE_X}px 40px ${PAD_LEFT}px`,
+              width: "100%",
+              height: "100%",
+              color: "#fff",
+              gap: CONTENT_GAP,
+            }}
+          >
+            {/* Title */}
+            <div style={{
+              fontSize: TITLE_SIZE,
+              fontWeight: 800,
+              lineHeight: 1.08,
+              letterSpacing: 0.2,
+              textShadow: "0 1px 0 #000, 0 12px 34px rgba(250,26,129,0.28), 0 6px 24px rgba(181,126,255,0.26)",
+              whiteSpace: "nowrap",
+            }}>
+              {title}
+            </div>
+
+            {/* Accent bar */}
+            <div style={{
+              height: Math.max(5, Math.round(6 * SCALE)),
+              width: Math.round(260 * SCALE),
+              borderRadius: 999,
+              marginTop: Math.round(6 * SCALE),
+              background: "linear-gradient(90deg, #ff51b3, #b57eff, #b5fffc)",
+              opacity: 0.55,
+              boxShadow: "0 6px 20px rgba(181,126,255,0.35)",
+            }} />
+
+            {/* Name */}
+            <div style={{
+              fontSize: NAME_SIZE,
+              fontWeight: 800,
+              lineHeight: 1.06,
+              textShadow: "0 1px 0 #000, 0 10px 30px rgba(0,0,0,0.45)",
+              maxWidth: 900,
+            }}>
+              {name}
+            </div>
+
+            {/* Chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: CHIPS_GAP, maxWidth: 1100 }}>
+              <div style={chip}><span style={{ opacity: 0.78 }}>XP:</span><span style={{ fontWeight: 900 }}>{xp.toLocaleString()}</span></div>
+              <div style={chip}><span style={{ opacity: 0.78 }}>Rank:</span><span style={{ fontWeight: 900 }}>#{rank}</span></div>
+              <div style={chip}><span style={{ opacity: 0.78 }}>Percentile:</span><span style={{ fontWeight: 900 }}>{pct}</span></div>
+            </div>
+
+            {/* Tagline */}
+            <div style={{
+              marginTop: Math.round(6 * SCALE),
+              fontSize: Math.round(34 * SCALE),
+              fontWeight: 900,
+              opacity: 0.98,
+              textShadow: "0 1px 0 #000, 0 8px 26px rgba(0,0,0,0.45)",
+            }}>
+              {tagline}
+            </div>
           </div>
-          {copied ? <div className="toast">{copied}</div> : null}
-        </div>
-        <p className="hint">Tip: this page’s preview is the same image platforms will use when you post the link.</p>
-      </main>
 
-      <style jsx>{`
-        .wrap {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 24px;
-          background: linear-gradient(135deg, #ffb6d5 0%, #b57eff 40%, #8bb7ff 100%);
-        }
-        .card {
-          width: 100%;
-          max-width: 980px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 16px;
-          background: rgba(15, 5, 25, 0.55);
-          border: 1px solid rgba(255,255,255,.16);
-          border-radius: 18px;
-          padding: 16px;
-          backdrop-filter: blur(10px) saturate(1.2);
-          box-shadow: 0 30px 60px rgba(0,0,0,.35);
-        }
-        .preview {
-          width: 100%;
-          height: auto;
-          border-radius: 12px;
-          border: 1px solid rgba(255,255,255,.2);
-          box-shadow: 0 10px 28px rgba(0,0,0,.35);
-        }
-        .actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          justify-content: center;
-        }
-        .btn {
-          padding: 10px 14px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,.24);
-          background: rgba(255,255,255,.12);
-          color: #fff;
-          font-weight: 900;
-          cursor: pointer;
-          transition: transform .12s ease, box-shadow .2s ease, background .2s ease;
-        }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 22px rgba(0,0,0,.28); }
-        .btn:active { transform: translateY(0); }
-        .btn-primary {
-          background: linear-gradient(90deg,#fa1a81,#b57eff);
-          border-color: rgba(255,255,255,.28);
-          box-shadow: 0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28);
-        }
-        .btn-x {
-          background: radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%);
-          border-color: rgba(255,255,255,.22);
-        }
-        .toast {
-          margin-top: 6px;
-          background: rgba(0,0,0,.7);
-          color:#fff;
-          padding:8px 12px;
-          border:1px solid rgba(255,255,255,.18);
-          border-radius: 10px;
-          font-weight: 900;
-        }
-        .hint {
-          margin-top: 10px;
-          color: #fff;
-          opacity: .9;
-          font-weight: 800;
-          text-shadow: 0 1px 0 #000;
-        }
-      `}</style>
-    </>
-  );
+          {/* Watermark */}
+          {!hideWm && (
+            <div style={{ position: "absolute", right: 28, bottom: 22, display: "flex", alignItems: "center" }}>
+              <div style={{
+                padding: "8px 14px",
+                borderRadius: 999,
+                border: "1.6px solid rgba(255, 85, 170, 0.55)",
+                background: "linear-gradient(180deg, rgba(255, 120, 195, 0.18), rgba(0,0,0,0.24))",
+                boxShadow: "0 8px 18px rgba(0,0,0,0.32), 0 0 18px rgba(255, 85, 170, 0.35), inset 0 1px 6px rgba(255,255,255,0.18)",
+                fontSize: 20,
+                fontWeight: 900,
+                letterSpacing: 0.4,
+                color: "#ff51b3",
+                textShadow: "0 1px 0 #000, 0 0 10px rgba(255, 81, 179, 0.55), 0 0 18px rgba(255, 81, 179, 0.35)",
+                opacity: 0.98,
+              }}>
+                crushai.fun
+              </div>
+            </div>
+          )}
+        </div>
+      ),
+      {
+        width: W,
+        height: H,
+        fonts: [
+          inter800 && { name: "Inter", data: inter800, weight: 800, style: "normal" },
+          inter700 && { name: "Inter", data: inter700, weight: 700, style: "normal" },
+        ].filter(Boolean),
+      }
+    );
+  } catch (e) {
+    return new Response(`OG error: ${e.message}`, { status: 500 });
+  }
 }
