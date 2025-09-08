@@ -1,6 +1,8 @@
-// pages/api/x-banner/[id].js — OG card on experimental-edge (Next 13.4.x, Pages Router)
+// pages/api/x-banner/[id].js — OG card on Edge (Next 13.4.x, Pages Router)
 import { ImageResponse } from "next/og";
-export const config = { runtime: "experimental-edge" };
+export const config = { runtime: "edge" }; // <- changed from experimental-edge
+
+
 
 /* ---------------- helpers (edge-safe) ---------------- */
 async function loadFontFrom(candidates) {
