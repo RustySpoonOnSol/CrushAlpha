@@ -1,6 +1,6 @@
-// src/pages/api/x-banner/[id].js
-import { ImageResponse } from "next/server";
-export const config = { runtime: "edge" };
+// pages/api/x-banner/[id].js — OG card on experimental-edge (Next 13.4.x, Pages Router)
+import { ImageResponse } from "next/og";
+export const config = { runtime: "experimental-edge" };
 
 /* ---------------- helpers (edge-safe) ---------------- */
 async function loadFontFrom(candidates) {
@@ -36,6 +36,15 @@ async function toDataURL(url) {
   }
 }
 
+async function firstImageDataURL(urls) {
+  for (const u of urls) {
+    if (!u) continue;
+    const d = await toDataURL(u);
+    if (d) return d;
+  }
+  return null;
+}
+
 /* ---------------- route ---------------- */
 export default async function handler(req) {
   try {
@@ -55,7 +64,14 @@ export default async function handler(req) {
     const center  = u.searchParams.get("center") === "1";     // center-align content
 
     const origin = u.origin;
-    const bgUrl  = u.searchParams.get("bg") || `${origin}/brand/x-banner.png`;
+
+    // Robust PNG banner (explicit ?bg= wins; else try same-origin fallbacks)
+    const bgData = await firstImageDataURL([
+      u.searchParams.get("bg"),
+      `${origin}/brand/x-banner.png`,
+      `${origin}/images/x-banner.png`,
+      `${origin}/x-banner.png`,
+    ]);
 
     // Optional fonts (safe to fail)
     const [inter800, inter700] = await Promise.all([
@@ -69,9 +85,6 @@ export default async function handler(req) {
         "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.5/files/inter-latin-700-normal.woff",
       ]),
     ]);
-
-    // Background (safe to fail)
-    const bgData = await toDataURL(bgUrl);
 
     // Canvas
     const W = 1500, H = 500;
@@ -94,8 +107,8 @@ export default async function handler(req) {
     const CHIP_BORDER = Math.max(2, Math.round((compact ? 3 : 3.5) * SCALE));
 
     // Spacing / Safe area
-    const SAFE_X = 60;                       // side padding regardless of layout
-    const PAD_LEFT = center ? 420 : 520;      // keep clear of heart art on left
+    const SAFE_X = 60;
+    const PAD_LEFT = center ? 420 : 520;
     const CONTENT_GAP = Math.round((compact ? 14 : 18) * SCALE);
     const CHIPS_GAP   = Math.round((compact ? 18 : 22) * SCALE);
 

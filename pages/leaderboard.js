@@ -564,7 +564,7 @@ export default function LeaderboardPage(){
     });
     const openBanner = () => {
       if (!shareId) return;
-      const path = `/card/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
+      const path = `/api/x-banner/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
       window.open(path, "_blank", "noopener,noreferrer");
     };
 
