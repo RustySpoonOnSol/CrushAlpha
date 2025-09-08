@@ -142,7 +142,6 @@ body {
   filter: brightness(1.15) saturate(1.2);
 }
 
-
 @keyframes neonPulse {
   0%, 100% {
     filter: brightness(1.3) saturate(1.2);
@@ -620,8 +619,6 @@ input[type="text"], input[type="text"]::placeholder {
   box-shadow: 0 0 6px #fa1a81, 0 0 12px #e098f8;
 }
 
-
-
 @keyframes xp-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.85; }
@@ -709,7 +706,6 @@ input[type="text"], input[type="text"]::placeholder {
   box-shadow: 0 0 4px #fa1a81;
 }
 
-
 @keyframes heart-pop {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.2); }
@@ -731,7 +727,6 @@ input[type="text"], input[type="text"]::placeholder {
   top: 110px;
   right: 6vw;
 }
-
 
 /* --- Responsive: Lower the cupids below nav on small screens --- */
 @media (max-width: 900px) {
@@ -879,8 +874,35 @@ input[type="text"], input[type="text"]::placeholder {
   line-height: 1 !important;
 }
 
+/* === GOD-TIER ADDITIONS (non-destructive) === */
 
+/* Locked text blur overlay for locked text previews */
+.locked-blur {
+  position: relative;
+  filter: blur(6px);
+}
+.locked-blur::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.25));
+}
 
+/* Smooth hover zoom for images in figure tags */
+figure img {
+  transition: transform 320ms ease, filter 320ms ease;
+}
+figure:hover img {
+  transform: scale(1.03);
+}
 
-
-
+/* Lightweight shimmer for any lazy image */
+img[loading="lazy"] {
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  background-size: 200% 100%;
+  animation: shimmerLazy 1.2s linear infinite;
+}
+@keyframes shimmerLazy {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

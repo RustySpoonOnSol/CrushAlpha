@@ -28,6 +28,7 @@ const TREASURY_WALLET = process.env.NEXT_PUBLIC_TREASURY_WALLET || "";
  * - Free teaser set (minHold: 0)
  * - Multiple hold-tier sets (each set has its own minHold)
  * - Pay-per-image sets with per-image price AND optional per-image freeIfHold override
+ * - Bundle product (client button; server handles entitlement fanout)
  */
 const VAULT = [
   /* ===== FREE TEASERS ===== */
@@ -151,16 +152,15 @@ const VAULT = [
     ],
   },
 
-  /* ===== BUNDLE (displayed as CTA elsewhere typically) ===== */
-  // Buy all VIP Gallery 01 at a discount (handled server-side)
+  /* ===== BUNDLE (buy all VIP 01 at a discount) ===== */
   {
     id: "bundle-vip-01",
-    type: "cta",
+    type: "bundle",
     title: "Bundle: VIP Gallery 01 (All)",
     blurb: "Unlock all three VIP photos for less.",
     minHold: 0,
-    ctaHref: "#vip-bundle",
-    ctaLabel: "Unlock Bundle in Vault ↓",
+    priceCrush: 600, // UI only; server validates actual price
+    children: ["vip-gallery-01-1", "vip-gallery-01-2", "vip-gallery-01-3"],
   },
 
   /* ===== CTA ===== */
@@ -504,7 +504,14 @@ export default function MeetXenia() {
                 wallet={wallet}
                 nsfwUnlocked={hold >= NSFW_HOLD}
                 unlockedMap={unlockedMap}
-                onUnlocked={(id) => setUnlockedMap((m) => ({ ...m, [id]: true }))}
+                onUnlocked={(idOrIds) => {
+                  // support single id or array (bundle)
+                  setUnlockedMap((m) => {
+                    const next = { ...m };
+                    (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).forEach((id) => { next[id] = true; });
+                    return next;
+                  });
+                }}
                 authed={authed}
                 refCode={refCode}
               />
@@ -516,7 +523,7 @@ export default function MeetXenia() {
         <div className="w-full max-w-5xl mt-10 grid grid-cols-2 md:grid-cols-4 gap-4" aria-hidden="true">
           {["/sfw/s1.jpg", "/sfw/s2.jpg", "/nsfw/n1_blur.jpg", "/nsfw/n2_blur.jpg"].map((src, i) => (
             <div key={i} className="rounded-xl overflow-hidden border border-pink-300/30 bg-black/30">
-              <img src={src} alt="" aria-hidden="true" className={`w-full h-40 object-cover ${reducedMotion ? "" : "preview-pop"}`} />
+              <img src={src} alt="" aria-hidden="true" loading="lazy" className={`w-full h-40 object-cover ${reducedMotion ? "" : "preview-pop"}`} />
             </div>
           ))}
         </div>
@@ -577,11 +584,11 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
   const needed = Math.max(0, item.minHold - hold);
 
   return (
-    <div className="relative rounded-2xl border border-pink-300/30 bg-black/30 p-5 overflow-hidden">
+    <div className="ns-card relative rounded-2xl border border-pink-300/30 bg-black/30 p-5 overflow-hidden">
       <div className="flex items-center justify-between gap-3 mb-1">
         <h4 className="text-lg font-semibold text-white">{item.title}</h4>
-        {item.type === "pay-images" ? (
-          <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">Pay per image</span>
+        {item.type === "pay-images" || item.type === "bundle" ? (
+          <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">{item.type === "bundle" ? "Bundle" : "Pay per image"}</span>
         ) : unlocked ? (
           <span className="px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white">Unlocked</span>
         ) : (
@@ -590,25 +597,38 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
       </div>
       <div className="text-pink-100/90 mb-3">{item.blurb}</div>
 
+      {/* TEXT CONTENT — premium blur when locked */}
       {item.type === "text" && (
-        <div className={`rounded-xl border border-pink-300/25 ${unlocked ? "bg-white/5" : "bg-black/40"}`}>
-          <ul className="p-4 list-disc pl-6 space-y-1 text-pink-50">
-            {(item.content || []).map((line, i) => <li key={i}>{unlocked ? line : blurText(line)}</li>)}
-          </ul>
+        <div className={`relative rounded-xl border border-pink-300/25 ${unlocked ? "bg-white/5" : "bg-black/40"}`}>
+          <div className={`p-4 ${unlocked ? "" : "locked-blur"}`}>
+            <ul className="list-disc pl-6 space-y-1 text-pink-50">
+              {(item.content || []).map((line, i) => <li key={i}>{line}</li>)}
+            </ul>
+          </div>
+          {!unlocked && (
+            <div className="absolute inset-0 flex items-end justify-between p-3 pointer-events-none">
+              <span className="text-pink-100/90 text-xs bg-black/40 px-2 py-1 rounded-md border border-pink-300/25">
+                Teaser — hold more $CRUSH to read
+              </span>
+              <span className="text-pink-200/80 text-xs">✨</span>
+            </div>
+          )}
         </div>
       )}
 
+      {/* IMAGE SETS (hold-gated) */}
       {item.type === "images" && (
         <div className="grid grid-cols-3 gap-2">
           {(item.images || []).map((im, i) => (
             <figure key={i} className="rounded-lg overflow-hidden border border-pink-300/25 bg-white/5">
-              <img src={im.src} alt={im.alt} className={`w-full h-28 object-cover ${unlocked ? "" : "opacity-70 blur-sm"}`} loading="lazy" />
+              <img src={im.src} alt={im.alt} loading="lazy" className={`w-full h-28 object-cover ${unlocked ? "" : "opacity-70 blur-sm"}`} />
               <figcaption className="px-2 py-1 text-xs text-pink-100/90">{unlocked ? im.alt : "Locked preview"}</figcaption>
             </figure>
           ))}
         </div>
       )}
 
+      {/* PAY-PER-IMAGE */}
       {item.type === "pay-images" && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(item.images || []).map((im) => {
@@ -617,7 +637,7 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
             const canOpen = fully && authed; // must be authed to fetch media
             return (
               <figure key={im.id} className="rounded-lg overflow-hidden border border-pink-300/25 bg-white/5">
-                <img src={im.preview} alt={im.title} className={`w-full h-40 object-cover ${fully ? "" : "opacity-70 blur-sm"}`} loading="lazy" />
+                <img src={im.preview} alt={im.title} loading="lazy" className={`w-full h-40 object-cover ${fully ? "" : "opacity-70 blur-sm"}`} />
                 <figcaption className="px-2 py-1 text-xs text-pink-100/90 flex items-center justify-between">
                   <span>{im.title}</span>
                   {!fully && (
@@ -653,7 +673,27 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
         </div>
       )}
 
-      {item.type !== "pay-images" && !unlocked && (
+      {/* BUNDLE PURCHASE */}
+      {item.type === "bundle" && (
+        <div className="rounded-xl border border-pink-300/25 bg-white/5 p-3">
+          <div className="text-pink-100/90 text-sm mb-2">
+            Includes: {item.children.map((c, i) => <code key={c} className="mx-1 text-pink-200">{c}{i < item.children.length - 1 ? "," : ""}</code>)}
+          </div>
+          <PayUnlockButton
+            wallet={wallet}
+            itemId={item.id}
+            price={item.priceCrush}
+            onUnlocked={() => {
+              onUnlocked?.(item.children);
+              try { alert("Bundle unlocked! Enjoy ❤️"); } catch {}
+            }}
+            refCode={refCode}
+          />
+        </div>
+      )}
+
+      {/* BUY MORE $CRUSH ROW (for hold-gated items only) */}
+      {item.type !== "pay-images" && item.type !== "bundle" && !unlocked && (
         <div className="mt-3 flex items-center justify-between">
           <div className="text-pink-200 text-sm">You need <b>{needed.toLocaleString()}</b> more $CRUSH to unlock.</div>
           <Link href="/buy" className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">Get $CRUSH</Link>
@@ -662,8 +702,6 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
     </div>
   );
 }
-
-function blurText(s) { return s.replace(/[A-Za-z0-9]/g, (c, i) => (i % 3 === 0 ? c : "•")); }
 
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
@@ -683,7 +721,7 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
     } catch (e) { setErr(e?.message || "Payment failed"); } finally { setBusy(false); }
   }
   return (
-    <div className="flex flex-col gap-1 w-full">
+    <div className="share-group flex flex-col gap-1 w-full">
       <button onClick={start} disabled={busy} className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold disabled:opacity-60 w-full">
         {busy ? "Waiting…" : `Unlock for ${price} $CRUSH`}
       </button>
