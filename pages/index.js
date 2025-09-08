@@ -12,6 +12,8 @@ const ChatBox = dynamic(() => import("../components/ChatBox"), { ssr: false });
 const EMOJIS = ["💘", "💦", "💋", "❤️", "😘"];
 const LEFT_COUNT = 6;
 const RIGHT_COUNT = 6;
+
+// default hints (we'll auto-resolve at runtime below)
 const CUPID_LEFT_IMG = "/cupid_female.png";
 const CUPID_RIGHT_IMG = "/cupid_male.png";
 
@@ -26,6 +28,29 @@ const LS_NAME = "crush_display_name";
 const LS_NAME_OWNER = "crush_name_owner";
 const LS_GUEST = "crush_guest_id";
 const LS_WALLET = "crush_wallet";
+
+/* ---------- ASSET RESOLVER (robust: tries multiple folders & extensions) ---------- */
+const CANDIDATE_DIRS = ["", "/images", "/img", "/assets"]; // all relative to /public
+const CANDIDATE_EXTS = [".png", ".jpg", ".jpeg"];
+
+async function resolveAssetPath(basename, dirs = CANDIDATE_DIRS, exts = CANDIDATE_EXTS) {
+  // Try HEAD first (cheap); if provider blocks HEAD, try GET (cache-friendly).
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const p = `${dir}/${basename}${ext}`.replace(/\/+/g, "/");
+      try {
+        const r = await fetch(p, { method: "HEAD", cache: "no-store" });
+        if (r.ok) return p;
+      } catch {}
+      try {
+        const r = await fetch(p, { method: "GET", cache: "force-cache" });
+        if (r.ok) return p;
+      } catch {}
+    }
+  }
+  // Fallback to the most likely PNG at root
+  return `/${basename}.png`;
+}
 
 function ensureGuestId() {
   let g = "";
@@ -232,6 +257,35 @@ export default function Home() {
   const [tierName, setTierName] = useState("");
   const [checking, setChecking] = useState(false);
   const [gateError, setGateError] = useState("");
+
+  /* ---------- RESOLVED IMAGE PATHS (robust) ---------- */
+  const [cupidLeftSrc, setCupidLeftSrc] = useState(CUPID_LEFT_IMG);
+  const [cupidRightSrc, setCupidRightSrc] = useState(CUPID_RIGHT_IMG);
+  const [unlock1Src, setUnlock1Src] = useState("/nsfw1_blurred.png");
+  const [unlock2Src, setUnlock2Src] = useState("/nsfw2_blurred.png");
+
+  useEffect(() => {
+    if (!mounted) return;
+    (async () => {
+      const [l, r, u1, u2] = await Promise.all([
+        resolveAssetPath("cupid_female"),
+        resolveAssetPath("cupid_male"),
+        resolveAssetPath("nsfw1_blurred"),
+        resolveAssetPath("nsfw2_blurred"),
+      ]);
+      setCupidLeftSrc(l);
+      setCupidRightSrc(r);
+      setUnlock1Src(u1);
+      setUnlock2Src(u2);
+      // helpful logs if fallbacks were needed
+      if (l !== CUPID_LEFT_IMG || r !== CUPID_RIGHT_IMG) {
+        console.info("[CrushAI] Cupid images resolved to:", { left: l, right: r });
+      }
+      if (u1 !== "/nsfw1_blurred.png" || u2 !== "/nsfw2_blurred.png") {
+        console.info("[CrushAI] Unlock previews resolved to:", { u1, u2 });
+      }
+    })();
+  }, [mounted]);
 
   async function connectWallet() {
     try {
@@ -507,17 +561,23 @@ export default function Home() {
       {/* CUPIDS AND ARROW */}
       <div style={{ position: "fixed", width: "100%", left: 0, top: 0, pointerEvents: "none", zIndex: 40 }}>
         <img
-          src={CUPID_LEFT_IMG}
+          src={cupidLeftSrc}
           alt=""
           aria-hidden="true"
           className="cupid-img cupid-left"
+          loading="eager"
+          decoding="async"
+          onError={() => resolveAssetPath("cupid_female").then(setCupidLeftSrc)}
           style={{ animation: "cupid-float 5.8s ease-in-out infinite", transform: "scaleX(1)" }}
         />
         <img
-          src={CUPID_RIGHT_IMG}
+          src={cupidRightSrc}
           alt=""
           aria-hidden="true"
           className="cupid-img cupid-right"
+          loading="eager"
+          decoding="async"
+          onError={() => resolveAssetPath("cupid_male").then(setCupidRightSrc)}
           style={{ animation: "cupid-float 6.1s ease-in-out infinite", transform: "scaleX(1)" }}
         />
         {mounted && arrowVisible && (
@@ -811,14 +871,32 @@ export default function Home() {
           <div className="unlock-card relative w-full sm:w-48 h-40 sm:h-32 overflow-hidden rounded-lg hover:scale-105 transition-transform duration-300 cursor-pointer">
             <span className="unlock-heart">🔒💖</span>
             <div className="shimmer"></div>
-            <img src="/nsfw1_blurred.png" alt="NSFW preview 1" className="w-full h-full object-cover blur-sm" />
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs hover:animate-pulse">Unlock with $Crush</div>
+            <img
+              src={unlock1Src}
+              alt="NSFW preview 1"
+              className="w-full h-full object-cover blur-sm"
+              loading="lazy"
+              decoding="async"
+              onError={() => resolveAssetPath("nsfw1_blurred").then(setUnlock1Src)}
+            />
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs hover:animate-pulse">
+              Unlock with $Crush
+            </div>
           </div>
           <div className="unlock-card relative w-full sm:w-48 h-40 sm:h-32 overflow-hidden rounded-lg hover:scale-105 transition-transform duration-300 cursor-pointer">
             <span className="unlock-heart">🔒💖</span>
             <div className="shimmer"></div>
-            <img src="/nsfw2_blurred.png" alt="NSFW preview 2" className="w-full h-full object-cover blur-sm" />
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs hover:animate-pulse">Unlock with $Crush</div>
+            <img
+              src={unlock2Src}
+              alt="NSFW preview 2"
+              className="w-full h-full object-cover blur-sm"
+              loading="lazy"
+              decoding="async"
+              onError={() => resolveAssetPath("nsfw2_blurred").then(setUnlock2Src)}
+            />
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs hover:animate-pulse">
+              Unlock with $Crush
+            </div>
           </div>
         </div>
 
