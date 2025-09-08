@@ -21,8 +21,29 @@ const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const NSFW_HOLD = Number(process.env.NEXT_PUBLIC_NSFW_HOLD ?? "2000");
 const GODDESS_HOLD = Number(process.env.NEXT_PUBLIC_GODDESS_HOLD ?? "5000");
 
-/** ===== Content Catalog (kept) ===== */
+// (Optional) display only — real routing to treasury is done server-side in /api/pay/create
+const TREASURY_WALLET = process.env.NEXT_PUBLIC_TREASURY_WALLET || "";
+
+/** ===== Content Catalog =====
+ * - Free teaser set (minHold: 0)
+ * - Multiple hold-tier sets (each set has its own minHold)
+ * - Pay-per-image sets with per-image price AND optional per-image freeIfHold override
+ */
 const VAULT = [
+  /* ===== FREE TEASERS ===== */
+  {
+    id: "free-teasers-01",
+    type: "images",
+    title: "Free Teasers · 01",
+    blurb: "A little taste — no $CRUSH required.",
+    minHold: 0,
+    images: [
+      { src: "/xenia/free/free-01.jpg", alt: "Xenia — free teaser 1" },
+      { src: "/xenia/free/free-02.jpg", alt: "Xenia — free teaser 2" },
+    ],
+  },
+
+  /* ===== TEXT / SFW ===== */
   {
     id: "opener-pack-01",
     type: "text",
@@ -54,6 +75,8 @@ const VAULT = [
       "Your hand hovers—bold, but waiting. Good. I like patience… until I don’t.",
     ],
   },
+
+  /* ===== HOLD-GATED SFW SET ===== */
   {
     id: "sfw-tease-set",
     type: "images",
@@ -63,22 +86,84 @@ const VAULT = [
     images: [
       { src: "/xenia/sfw/tease-01.jpg", alt: "Xenia — playful pose" },
       { src: "/xenia/sfw/tease-02.jpg", alt: "Xenia — wink" },
-      { src: "/xenia/sfw/tease-3.jpg", alt: "Xenia — neon glow" },
+      { src: "/xenia/sfw/tease-03.jpg", alt: "Xenia — neon glow" },
     ],
   },
-  // VIP pay-per-image; free if user holds ≥ NSFW_HOLD
+
+  /* ===== MULTIPLE HOLD-TIER IMAGE SETS ===== */
+  {
+    id: "hold-1000",
+    type: "images",
+    title: "Holder Tier · 1,000+",
+    blurb: "Unlocked by holding ≥ 1,000 $CRUSH.",
+    minHold: 1000,
+    images: [
+      { src: "/xenia/hold/h1-01.jpg", alt: "Xenia — 1k holders set 1" },
+      { src: "/xenia/hold/h1-02.jpg", alt: "Xenia — 1k holders set 2" },
+    ],
+  },
+  {
+    id: "hold-3000",
+    type: "images",
+    title: "Holder Tier · 3,000+",
+    blurb: "Unlocked by holding ≥ 3,000 $CRUSH.",
+    minHold: 3000,
+    images: [
+      { src: "/xenia/hold/h3-01.jpg", alt: "Xenia — 3k holders set 1" },
+      { src: "/xenia/hold/h3-02.jpg", alt: "Xenia — 3k holders set 2" },
+    ],
+  },
+  {
+    id: "hold-7000",
+    type: "images",
+    title: "Holder Tier · 7,000+",
+    blurb: "Unlocked by holding ≥ 7,000 $CRUSH.",
+    minHold: 7000,
+    images: [
+      { src: "/xenia/hold/h7-01.jpg", alt: "Xenia — 7k holders set 1" },
+      { src: "/xenia/hold/h7-02.jpg", alt: "Xenia — 7k holders set 2" },
+    ],
+  },
+
+  /* ===== PAY-PER-IMAGE; FREE FOR BIG HOLDERS OR PER-IMAGE OVERRIDE ===== */
   {
     id: "vip-gallery-01",
     type: "pay-images",
     title: "VIP Gallery Drop · 01",
-    blurb: "Exclusive set. Pay per-image to unlock, or hold enough $CRUSH for full access.",
+    blurb: "Exclusive set. Pay per-image to unlock, or hold enough $CRUSH for free access.",
     minHold: 0,
     images: [
-      { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.jpg" },
-      { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 250, preview: "/xenia/nsfw/nsfw-02-blur.jpg" },
-      { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 250, preview: "/xenia/nsfw/nsfw-03-blur.jpg" },
+      { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.jpg", freeIfHold: 2000 },
+      { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 300, preview: "/xenia/nsfw/nsfw-02-blur.jpg", freeIfHold: 3000 },
+      { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 400, preview: "/xenia/nsfw/nsfw-03-blur.jpg", freeIfHold: 5000 },
     ],
   },
+  {
+    id: "pp-gallery-02",
+    type: "pay-images",
+    title: "Purchase-Only Gallery · 02",
+    blurb: "Each photo can be unlocked individually with $CRUSH. Payments go to treasury.",
+    minHold: 0,
+    images: [
+      { id: "pp-02-1", title: "Photo A", priceCrush: 500, preview: "/xenia/pp/pp-01-blur.jpg" },
+      { id: "pp-02-2", title: "Photo B", priceCrush: 750, preview: "/xenia/pp/pp-02-blur.jpg", freeIfHold: 3500 },
+      { id: "pp-02-3", title: "Photo C", priceCrush: 1000, preview: "/xenia/pp/pp-03-blur.jpg" },
+    ],
+  },
+
+  /* ===== BUNDLE (displayed as CTA elsewhere typically) ===== */
+  // Buy all VIP Gallery 01 at a discount (handled server-side)
+  {
+    id: "bundle-vip-01",
+    type: "cta",
+    title: "Bundle: VIP Gallery 01 (All)",
+    blurb: "Unlock all three VIP photos for less.",
+    minHold: 0,
+    ctaHref: "#vip-bundle",
+    ctaLabel: "Unlock Bundle in Vault ↓",
+  },
+
+  /* ===== CTA ===== */
   {
     id: "custom-goddess",
     type: "cta",
@@ -116,11 +201,11 @@ async function getCrushBalance(owner, mint) {
 }
 
 /** ===== Pay & Verify ===== */
-async function createPayment({ wallet, itemId }) {
+async function createPayment({ wallet, itemId, ref }) {
   const r = await fetch("/api/pay/create", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ wallet, itemId }),
+    body: JSON.stringify({ wallet, itemId, ref, treasury: true }),
   });
   if (!r.ok) throw new Error("Create payment failed");
   return r.json();
@@ -178,15 +263,30 @@ export default function MeetXenia() {
   const [hold, setHold] = useState(0);
   const [checking, setChecking] = useState(false);
   const [err, setErr] = useState("");
-  const [unlockedMap, setUnlockedMap] = useState({}); // { [itemId]: true }
+  const [unlockedMap, setUnlockedMap] = useState({});
   const [reducedMotion, setReducedMotion] = useState(false);
+
+  // viral: soft-referral support (?ref=code) → stored + forwarded during pay
+  const [refCode, setRefCode] = useState("");
 
   useEffect(() => {
     setMounted(true);
     try { setReducedMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches); } catch {}
+
+    // capture ?ref= from URL, persist, and use thereafter
+    try {
+      const u = new URL(window.location.href);
+      const ref = u.searchParams.get("ref");
+      const saved = localStorage.getItem("crush_ref") || "";
+      if (ref && ref !== saved) {
+        localStorage.setItem("crush_ref", ref);
+        setRefCode(ref);
+      } else if (saved) {
+        setRefCode(saved);
+      }
+    } catch {}
   }, []);
 
-  // set wallet, clear session state, refresh
   const setActiveWallet = async (pk) => {
     setWallet(pk); setAuthed(false); setHold(0); setUnlockedMap({});
     try { localStorage.setItem("crush_wallet", pk); } catch {}
@@ -198,7 +298,6 @@ export default function MeetXenia() {
     try { const me = await getMe(); setAuthed(me.authed && me.wallet === pk); } catch {}
   };
 
-  // init + subscribe Phantom account changes
   useEffect(() => {
     if (!mounted) return;
     const stored = localStorage.getItem("crush_wallet") || "";
@@ -206,7 +305,7 @@ export default function MeetXenia() {
     if (window?.solana?.isPhantom) {
       const onAcct = async (pubkey) => {
         const next = pubkey?.toString?.() || pubkey || "";
-        await logoutSession(); // clear any previous signed session on swap
+        await logoutSession();
         if (!next) {
           setWallet(""); setAuthed(false); setHold(0); setUnlockedMap({});
           try { localStorage.removeItem("crush_wallet"); } catch {}
@@ -216,7 +315,6 @@ export default function MeetXenia() {
       };
       try { window.solana.on?.("accountChanged", onAcct); } catch {}
 
-      // try auto-connect
       window.solana.connect({ onlyIfTrusted: true }).then(async (r) => {
         const pk = r?.publicKey?.toString();
         if (pk) await setActiveWallet(pk);
@@ -272,7 +370,6 @@ export default function MeetXenia() {
     finally { setChecking(false); }
   }
 
-  // also re-sync to Phantom current account if silently changed
   async function syncAndRefresh() {
     try {
       if (window?.solana?.isPhantom) {
@@ -287,7 +384,6 @@ export default function MeetXenia() {
   }
 
   const chatUnlocked = hold >= CHAT_MIN_HOLD;
-  const nsfwUnlocked = hold >= NSFW_HOLD;
 
   const vaultWithNeed = useMemo(
     () => VAULT.map((it) => ({ ...it, needed: Math.max(0, it.minHold - hold) })), [hold]
@@ -354,6 +450,11 @@ export default function MeetXenia() {
               <div className="text-pink-50 text-sm">Your $CRUSH: <b>{hold.toLocaleString()}</b></div>
             </>
           )}
+          {TREASURY_WALLET && (
+            <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-xs text-pink-200">
+              Treasury receiving paid unlocks: <span className="font-mono">{TREASURY_WALLET.slice(0,4)}…{TREASURY_WALLET.slice(-4)}</span>
+            </div>
+          )}
           {err && <div className="text-pink-200 text-sm">{err}</div>}
         </div>
 
@@ -405,6 +506,7 @@ export default function MeetXenia() {
                 unlockedMap={unlockedMap}
                 onUnlocked={(id) => setUnlockedMap((m) => ({ ...m, [id]: true }))}
                 authed={authed}
+                refCode={refCode}
               />
             ))}
           </div>
@@ -454,7 +556,6 @@ export default function MeetXenia() {
   );
 }
 
-/** ===== Presentational components ===== */
 function TierCard({ title, desc, features = [], status = "locked", ctas = null }) {
   const badge = status === "unlocked" ? "bg-green-500 text-white" : status === "soon" ? "bg-yellow-500 text-black" : "bg-pink-500 text-white";
   const label = status === "unlocked" ? "Unlocked" : status === "soon" ? "Soon" : "Locked";
@@ -471,7 +572,7 @@ function TierCard({ title, desc, features = [], status = "locked", ctas = null }
   );
 }
 
-function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, authed }) {
+function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, authed, refCode }) {
   const unlocked = hold >= item.minHold;
   const needed = Math.max(0, item.minHold - hold);
 
@@ -479,7 +580,9 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
     <div className="relative rounded-2xl border border-pink-300/30 bg-black/30 p-5 overflow-hidden">
       <div className="flex items-center justify-between gap-3 mb-1">
         <h4 className="text-lg font-semibold text-white">{item.title}</h4>
-        {unlocked ? (
+        {item.type === "pay-images" ? (
+          <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">Pay per image</span>
+        ) : unlocked ? (
           <span className="px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white">Unlocked</span>
         ) : (
           <span className="px-2 py-1 rounded-full text-xs font-bold bg-pink-500 text-white">Needs {item.minHold.toLocaleString()}</span>
@@ -509,12 +612,20 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
       {item.type === "pay-images" && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(item.images || []).map((im) => {
-            const fully = nsfwUnlocked || !!unlockedMap[im.id];
+            const perImageFree = typeof im.freeIfHold === "number" ? (hold >= im.freeIfHold) : false;
+            const fully = nsfwUnlocked || perImageFree || !!unlockedMap[im.id];
             const canOpen = fully && authed; // must be authed to fetch media
             return (
               <figure key={im.id} className="rounded-lg overflow-hidden border border-pink-300/25 bg-white/5">
                 <img src={im.preview} alt={im.title} className={`w-full h-40 object-cover ${fully ? "" : "opacity-70 blur-sm"}`} loading="lazy" />
-                <figcaption className="px-2 py-1 text-xs text-pink-100/90">{im.title}</figcaption>
+                <figcaption className="px-2 py-1 text-xs text-pink-100/90 flex items-center justify-between">
+                  <span>{im.title}</span>
+                  {!fully && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 border border-pink-300/30">
+                      {typeof im.freeIfHold === "number" ? `Free ≥ ${im.freeIfHold.toLocaleString()}` : `Free ≥ ${NSFW_HOLD.toLocaleString()}`}
+                    </span>
+                  )}
+                </figcaption>
                 <div className="p-2 flex items-center justify-between gap-2">
                   {canOpen ? (
                     <a className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold w-full text-center"
@@ -524,7 +635,16 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
                       {authed ? "Unlocked" : "Secure Login required"}
                     </span>
                   ) : (
-                    <PayUnlockButton wallet={wallet} itemId={im.id} price={im.priceCrush} onUnlocked={() => onUnlocked?.(im.id)} />
+                    <PayUnlockButton
+                      wallet={wallet}
+                      itemId={im.id}
+                      price={im.priceCrush}
+                      onUnlocked={() => {
+                        onUnlocked?.(im.id);
+                        try { alert("Unlocked! Enjoy ❤️"); } catch {}
+                      }}
+                      refCode={refCode}
+                    />
                   )}
                 </div>
               </figure>
@@ -544,13 +664,14 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
 }
 
 function blurText(s) { return s.replace(/[A-Za-z0-9]/g, (c, i) => (i % 3 === 0 ? c : "•")); }
-function PayUnlockButton({ wallet, itemId, price, onUnlocked }) {
+
+function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   async function start() {
     if (!wallet) return setErr("Connect wallet first");
     setBusy(true); setErr("");
     try {
-      const { url, reference } = await createPayment({ wallet, itemId });
+      const { url, reference } = await createPayment({ wallet, itemId, ref: refCode || undefined });
       window.open(url, "_blank", "noopener,noreferrer");
       const t0 = Date.now();
       while (Date.now() - t0 < 120000) {
@@ -566,6 +687,14 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked }) {
       <button onClick={start} disabled={busy} className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold disabled:opacity-60 w-full">
         {busy ? "Waiting…" : `Unlock for ${price} $CRUSH`}
       </button>
+      {!busy && (
+        <ShareOnX
+          text={`I'm unlocking ${itemId} on Crush AI 🔥`}
+          url={typeof window !== "undefined" ? window.location.href.split("?")[0] : "https://yourdomain.com/meet-xenia"}
+          hashtags={["CrushAI", "Solana"]}
+          via="CrushAIx"
+        />
+      )}
       {err && <span className="text-pink-200 text-xs">{err}</span>}
     </div>
   );
