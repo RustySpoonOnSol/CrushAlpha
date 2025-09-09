@@ -111,12 +111,12 @@ export default function XBannerCard() {
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
 
-    // typography + pills (premium look)
+    // typography + pills (premium look) — slightly smaller to guarantee fit
     ctx.fillStyle = "#fff";
     ctx.textBaseline = "top";
     ctx.shadowColor = "rgba(255, 0, 160, 0.45)";
-    ctx.shadowBlur = 28;
-    ctx.font = "900 120px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.shadowBlur = 26;
+    ctx.font = "900 108px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText("Crush AI", 72, 46);
 
     const ugrad = ctx.createLinearGradient(72, 0, 420, 0);
@@ -124,13 +124,13 @@ export default function XBannerCard() {
     ugrad.addColorStop(1, "#6fd3ff");
     ctx.fillStyle = ugrad;
     ctx.shadowBlur = 0;
-    ctx.fillRect(72, 180, 360, 7);
+    ctx.fillRect(72, 170, 320, 6);
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = "900 86px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-    ctx.fillText(name, 72, 208);
+    ctx.font = "900 70px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText(name, 72, 196);
 
-    const round = (x, y, w, h, r = 28) => {
+    const round = (x, y, w, h, r = 26) => {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -140,47 +140,47 @@ export default function XBannerCard() {
       ctx.closePath();
     };
     const pill = (label, x, y) => {
-      ctx.font = "900 40px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      const padX = 22;
+      ctx.font = "900 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      const padX = 20;
       const w = ctx.measureText(label).width + padX * 2;
-      const h = 70;
+      const h = 64;
       const g = ctx.createLinearGradient(0, y, 0, y + h);
       g.addColorStop(0, "rgba(255,255,255,0.08)");
       g.addColorStop(1, "rgba(255,255,255,0.04)");
       ctx.fillStyle = "rgba(5,5,12,0.55)";
-      round(x, y, w, h, 32);
+      round(x, y, w, h, 30);
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.fillStyle = g;
-      round(x, y, w, h, 32);
+      round(x, y, w, h, 30);
       ctx.fill();
 
       ctx.fillStyle = "#fff";
-      ctx.fillText(label, x + padX, y + 14);
+      ctx.fillText(label, x + padX, y + 12);
       return x + w + 16;
     };
-    let X = 72, Y = 300;
+    let X = 72, Y = 282;
     X = pill(`XP: ${xp.toLocaleString()}`, X, Y);
     X = pill(`Rank: ${rank}`, X, Y);
     pill(`Percentile: ${pct}`, X, Y);
 
-    ctx.font = "900 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.font = "900 36px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#fff";
-    ctx.fillText("Chat. Flirt. Climb.", 72, 392);
+    ctx.fillText("Chat. Flirt. Climb.", 72, 370);
 
     const wmText = "crushai.fun";
-    ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.font = "900 26px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     const wmW = ctx.measureText(wmText).width;
-    const pad = 16;
+    const pad = 14;
     const bx = W - wmW - pad * 2 - 40;
-    const by = H - 54;
-    round(bx, by, wmW + pad * 2, 40, 22);
+    const by = H - 50;
+    round(bx, by, wmW + pad * 2, 36, 20);
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.stroke();
     ctx.fillStyle = "#ffb6e6";
-    ctx.fillText(wmText, bx + pad, by + 8);
+    ctx.fillText(wmText, bx + pad, by + 7);
 
     const dataUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
@@ -197,7 +197,7 @@ export default function XBannerCard() {
       </Head>
 
       <div className="page">
-        {/* ROW 1: Card */}
+        {/* Card */}
         <div className="stage">
           <div className="glow glow-pink" />
           <div className="glow glow-cyan" />
@@ -235,7 +235,7 @@ export default function XBannerCard() {
           <div className="edge" />
         </div>
 
-        {/* ROW 2: Dock (matches width of card; sits right below it) */}
+        {/* Dock */}
         <div className="dock">
           <button onClick={shareToX}>Share on X</button>
           <button onClick={() => copy(pageUrl)}>Copy page link</button>
@@ -257,13 +257,12 @@ export default function XBannerCard() {
       <style jsx>{`
         :global(html, body) { background:#09080d; }
 
-        /* NEW: two auto rows so there is NO giant filler space */
         .page {
           min-height: 100vh;
           display: grid;
-          grid-template-rows: auto auto; /* <— key change */
+          grid-template-rows: auto auto;
           align-content: start;
-          row-gap: clamp(10px, 1.8vh, 18px); /* tasteful gap between card & dock */
+          row-gap: clamp(10px, 1.8vh, 18px);
           justify-items: center;
           color: #fff;
           padding: clamp(14px, 2vh, 22px) 0;
@@ -276,7 +275,7 @@ export default function XBannerCard() {
         .stage {
           position: relative;
           width: min(1200px, 95vw);
-          aspect-ratio: 3 / 1;
+          aspect-ratio: 2.9 / 1; /* a touch taller so nothing clips */
           border-radius: 22px;
           overflow: hidden;
           background: #0b0910;
@@ -307,12 +306,12 @@ export default function XBannerCard() {
           display: grid;
           grid-template-rows: auto auto auto 1fr;
           align-content: center;
-          padding: clamp(18px, 4vw, 56px);
-          gap: clamp(10px, 2.2vw, 22px);
+          padding: clamp(16px, 3.2vw, 48px);
+          gap: clamp(8px, 1.8vw, 18px);
           background: linear-gradient(to bottom, rgba(8,6,10,0.15), rgba(8,6,10,0.40));
         }
         .title {
-          font-size: clamp(42px, 9.2vw, 110px);
+          font-size: clamp(36px, 7.8vw, 96px); /* down a notch */
           margin: 0;
           font-weight: 1000;
           line-height: 0.95;
@@ -321,26 +320,26 @@ export default function XBannerCard() {
             0 0 12px rgba(255,255,255,0.15);
         }
         .underline {
-          width: clamp(160px, 30vw, 360px);
-          height: 6px;
+          width: clamp(140px, 26vw, 320px);
+          height: 5px;
           border-radius: 999px;
           background: linear-gradient(90deg, #ff70d9, #6fd3ff);
         }
         .name {
-          font-size: clamp(28px, 6.2vw, 72px);
+          font-size: clamp(24px, 5.4vw, 60px);
           margin: 0;
           font-weight: 1000;
           letter-spacing: 0.3px;
           text-shadow: 0 0 10px rgba(0,0,0,0.25);
         }
 
-        .stats { display: flex; gap: clamp(10px, 1.6vw, 18px); flex-wrap: wrap; margin-top: clamp(6px, 1.2vw, 8px); }
+        .stats { display: flex; gap: clamp(10px, 1.6vw, 18px); flex-wrap: wrap; margin-top: clamp(4px, 1vw, 8px); }
         .pill {
-          --padX: clamp(14px, 1.8vw, 22px);
-          padding: 12px var(--padX);
+          --padX: clamp(12px, 1.6vw, 20px);
+          padding: 10px var(--padX);
           border-radius: 999px;
           font-weight: 1000;
-          font-size: clamp(14px, 2.2vw, 24px);
+          font-size: clamp(13px, 1.9vw, 20px);
           color: #fff;
           background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
           border: 1px solid rgba(255,255,255,0.18);
@@ -348,19 +347,24 @@ export default function XBannerCard() {
           backdrop-filter: blur(6px);
         }
 
-        .tagline { align-self: end; font-size: clamp(18px, 3.3vw, 42px); font-weight: 1000; text-shadow: 0 0 10px rgba(0,0,0,0.25); }
+        .tagline {
+          align-self: end;
+          font-size: clamp(16px, 2.8vw, 32px); /* a touch smaller */
+          font-weight: 1000;
+          text-shadow: 0 0 10px rgba(0,0,0,0.25);
+          margin-top: clamp(4px, 1.2vw, 10px);
+        }
 
         .wm {
-          position: absolute; right: clamp(14px, 2vw, 24px); bottom: clamp(14px, 2vw, 24px);
+          position: absolute; right: clamp(14px, 2vw, 24px); bottom: clamp(12px, 2vw, 22px);
           font-weight: 1000; color: #ffb6e6;
           background: rgba(0,0,0,0.35);
           border: 1px solid rgba(255,255,255,0.22);
-          padding: 10px 16px; border-radius: 999px;
+          padding: 9px 14px; border-radius: 999px;
           backdrop-filter: blur(6px);
         }
         .loading { margin-left: 8px; opacity: 0.85; }
 
-        /* Dock now hugs the card, same width, with glass look */
         .dock {
           width: min(1200px, 95vw);
           display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
