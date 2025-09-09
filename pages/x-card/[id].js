@@ -1,212 +1,274 @@
+// pages/x-card/[id].js
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-export default function XCardPage() {
-  const { query, asPath } = useRouter();
+function sanitizeBg(s) {
+  if (!s) return "";
+  try {
+    const dec = decodeURIComponent(s);
+    // allow /relative OR http(s)
+    if (/^https?:\/\//i.test(dec) || dec.startsWith("/")) return dec;
+  } catch {}
+  return "";
+}
 
-  const id      = (query.id || "").toString();
-  const title   = (query.title   || "Crush AI").toString();
-  const name    = (query.name    || id || "Anonymous").toString();
-  const xp      = Number(query.xp || 0);
-  const rank    = (query.rank    || "?").toString();
-  const pct     = (query.pct     || "Top 100%").toString();
-  const tagline = (query.tagline || "Chat. Flirt. Climb.").toString();
-  const hideWm  = query.wm === "0";
+export default function XBannerCard() {
+  const router = useRouter();
+  const { id = "anon" } = router.query;
 
-  const DEFAULT_BG = "/brand/x-banner.png";
-  const [bgSrc, setBgSrc] = useState(DEFAULT_BG);
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const cardRef = useRef(null);
+  // --- read params
+  const name = (router.query.name || id || "Anonymous").toString();
+  const xp = Number(router.query.xp || 0);
+  const rank = router.query.rank ? `#${router.query.rank}` : "#?";
+  const pct = (router.query.pct || "Top 100%").toString();
+  const bgParam = sanitizeBg((router.query.bg || "").toString());
 
-  // Normalize bg => prefer relative; fallback to default on any issue
+  // --- banner fallback chain
+  const bgCandidates = useMemo(() => {
+    const arr = [];
+    if (bgParam) arr.push(bgParam);
+    arr.push("/brand/x-banner.png", "/images/x-banner.png");
+    return arr;
+  }, [bgParam]);
+
+  const [bgIdx, setBgIdx] = useState(0);
+  const [bgReady, setBgReady] = useState(false);
+  const [bgFailed, setBgFailed] = useState(false);
+
+  const curBg = bgCandidates[bgIdx] || ""; // if empty, we'll draw gradient
+
   useEffect(() => {
-    let p = (query.bg || "").toString().trim();
-    if (!p || p === "undefined" || p === "null") p = DEFAULT_BG;
-    try {
-      if (typeof window !== "undefined" && /^https?:\/\//i.test(p)) {
-        const u = new URL(p, window.location.origin);
-        if (u.origin === window.location.origin) p = u.pathname + u.search + u.hash;
-      }
-    } catch {
-      p = DEFAULT_BG;
-    }
-    setBgSrc(p);
-  }, [query.bg]);
+    // reset when params change
+    setBgIdx(0);
+    setBgReady(false);
+    setBgFailed(false);
+  }, [bgCandidates.join("|")]);
 
-  const shareUrl = useMemo(() => {
+  // If image errors, advance the chain; if we exhaust, mark failed
+  const onBgError = () => {
+    if (bgIdx < bgCandidates.length - 1) {
+      setBgIdx((i) => i + 1);
+    } else {
+      setBgFailed(true);
+      setBgReady(true); // stop showing "Loading…"
+    }
+  };
+
+  // Build a sharable page URL (used by Copy / Share)
+  const pageUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return window.location.origin.replace(/\/$/, "") + asPath;
-  }, [asPath]);
+    const u = new URL(window.location.href);
+    return u.toString();
+  }, [router.asPath]);
 
-  // Lazy-load html2canvas for client PNG capture
-  useEffect(() => {
-    if (typeof window === "undefined" || window.html2canvas) return;
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
-    s.async = true;
-    s.crossOrigin = "anonymous";
-    document.head.appendChild(s);
-    return () => { document.head.removeChild(s); };
-  }, []);
-
-  async function captureToBlob() {
-    const el = cardRef.current;
-    if (!el) throw new Error("Card not mounted");
-
-    if (typeof window !== "undefined" && window.html2canvas) {
-      const canvas = await window.html2canvas(el, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-      return await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Copied!");
+    } catch {
+      prompt("Copy this:", text);
     }
+  };
 
-    // Minimal fallback (SVG -> canvas rasterize)
-    const xml = new XMLSerializer().serializeToString(el);
-    const w = el.offsetWidth || 1500, h = el.offsetHeight || 500;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-      <foreignObject width="100%" height="100%">${xml}</foreignObject>
-    </svg>`;
-    const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image(); img.crossOrigin = "anonymous";
-    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-    const canvas = document.createElement("canvas"); canvas.width = w*2; canvas.height = h*2;
-    const ctx = canvas.getContext("2d"); ctx.scale(2,2); ctx.drawImage(img,0,0);
-    URL.revokeObjectURL(url);
-    return await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  }
+  const shareToX = () => {
+    const text = `Crush AI — ${name} · Rank ${rank} (${xp.toLocaleString()} XP)`;
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      text
+    )}&url=${encodeURIComponent(pageUrl)}&hashtags=CrushAI,Solana`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
-  async function downloadPNG() {
+  // Download PNG using the viewport (simple, no extra deps)
+  const wrapRef = useRef(null);
+  const downloadPng = async () => {
     try {
-      const blob = await captureToBlob();
-      if (!blob) return;
+      const domtoimage = (await import("html-to-image")).toPng;
+      const dataUrl = await domtoimage(wrapRef.current, {
+        pixelRatio: 2,
+        cacheBust: true,
+      });
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `crush_card_${id || "share"}.png`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    } catch (e) { console.error(e); alert("Could not create PNG right now."); }
-  }
-  async function copyImageUrl() {
-    try {
-      const blob = await captureToBlob();
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      await navigator.clipboard.writeText(url);
-      alert("Temporary image URL copied.");
-    } catch (e) { console.error(e); alert("Could not copy image URL."); }
-  }
-  async function copyPageLink() {
-    try { await navigator.clipboard.writeText(shareUrl); alert("Page link copied."); }
-    catch { prompt("Copy this link:", shareUrl); }
-  }
-  function shareToX() {
-    const text = `${title} — ${name}\nXP: ${xp.toLocaleString()}  •  Rank: #${rank}  •  ${pct}`;
-    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}&hashtags=CrushAI,Solana`;
-    window.open(intent, "_blank", "noopener,noreferrer");
-  }
-  async function shareNative() {
-    try {
-      if (navigator.share && navigator.canShare) {
-        const blob = await captureToBlob();
-        const file = blob ? new File([blob], `crush_card_${id||"share"}.png`, { type: "image/png" }) : null;
-        if (file && navigator.canShare({ files: [file] })) {
-          await navigator.share({ title: `${title} — ${name}`, text: "Crush AI", url: shareUrl, files: [file] });
-          return;
-        }
-      }
-    } catch {}
-    copyPageLink();
-  }
+      a.href = dataUrl;
+      a.download = "crush-card.png";
+      a.click();
+    } catch (e) {
+      alert("Could not render PNG here. Use mobile share instead.");
+    }
+  };
 
   return (
     <>
       <Head>
-        <title>{title} — Card</title>
+        <title>Crush AI — Card</title>
         <meta name="robots" content="noindex" />
-        <link rel="preload" as="image" href="/brand/x-banner.png" />
       </Head>
 
-      <main className="wrap">
-        <div className="card" ref={cardRef} aria-label="Share card">
-          <img
-            src={bgSrc}
-            alt=""
-            className="bg"
-            decoding="async"
-            fetchpriority="high"
-            draggable="false"
-            onLoad={() => setImgLoaded(true)}
-            onError={() => { if (bgSrc !== DEFAULT_BG) setBgSrc(DEFAULT_BG); }}
-          />
-          <div className="vignette" />
+      <div className="page">
+        <div className="stage" ref={wrapRef}>
+          {/* Background image/fallback */}
+          {!bgFailed && curBg ? (
+            <img
+              src={curBg}
+              alt=""
+              className="bg"
+              onLoad={() => setBgReady(true)}
+              onError={onBgError}
+              crossOrigin="anonymous"
+            />
+          ) : (
+            <div className="bg-fallback" />
+          )}
+
+          {/* Content overlay */}
           <div className="content">
-            <div className="title">{title}</div>
-            <div className="bar" />
-            <div className="who">{name}</div>
-            <div className="chips">
-              <div className="chip"><span className="k">XP:</span><span className="v">{xp.toLocaleString()}</span></div>
-              <div className="chip"><span className="k">Rank:</span><span className="v">#{rank}</span></div>
-              <div className="chip"><span className="k">Percentile:</span><span className="v">{pct}</span></div>
+            <div className="title">Crush AI</div>
+            <div className="name">{name}</div>
+
+            <div className="stats">
+              <div className="pill">XP: {xp.toLocaleString()}</div>
+              <div className="pill">Rank: {rank}</div>
+              <div className="pill">Percentile: {pct}</div>
             </div>
-            <div className="tagline">{tagline}</div>
+
+            <div className="tagline">Chat. Flirt. Climb.</div>
+
+            {/* watermark (shows Loading… until bg settles) */}
+            <div className="wm">
+              crushai.fun
+              {!bgReady && <span className="loading"> Loading…</span>}
+            </div>
           </div>
-          {hideWm ? null : <div className="wm">crushai.fun</div>}
-          {!imgLoaded && <div className="loading">Loading…</div>}
         </div>
 
-        <div className="dock" role="group" aria-label="Share actions">
-          <button className="btn btn-x" onClick={shareToX}>Share on X</button>
-          <button className="btn" onClick={copyPageLink}>Copy page link</button>
-          <button className="btn" onClick={copyImageUrl}>Copy image URL</button>
-          <button className="btn btn-primary" onClick={downloadPNG}>Download PNG</button>
-          <button className="btn" onClick={shareNative}>Share…</button>
+        {/* Share dock */}
+        <div className="dock">
+          <button onClick={shareToX}>Share on X</button>
+          <button onClick={() => copy(pageUrl)}>Copy page link</button>
+          <button onClick={() => copy(curBg || "/brand/x-banner.png")}>
+            Copy image URL
+          </button>
+          <button onClick={downloadPng}>Download PNG</button>
+          <button
+            onClick={async () => {
+              if (navigator.share) {
+                await navigator.share({ title: "Crush AI", url: pageUrl });
+              } else {
+                copy(pageUrl);
+              }
+            }}
+          >
+            Share…
+          </button>
         </div>
-      </main>
+      </div>
 
       <style jsx>{`
-        :root{ --pink:#fa1a81; --violet:#b57eff; --cyan:#b5fffc; }
-        html,body,#__next{height:100%} body{margin:0;background:#0b0512;color:#fff}
-        .wrap{min-height:100%; display:flex; flex-direction:column; align-items:center; gap:16px; padding:16px;}
-        .card{ position:relative; width:min(1500px,100%); aspect-ratio:3/1; border-radius:16px; overflow:hidden;
-               background:#0b0512; box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.06); }
-        .bg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-        .vignette{ position:absolute; inset:0;
-          background: radial-gradient(120% 140% at 30% 50%, rgba(0,0,0,.15) 0%, rgba(0,0,0,0) 45%),
-                     linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.18) 60%, rgba(0,0,0,.45)); }
-        .content{ position:relative; height:100%; display:flex; flex-direction:column; justify-content:center; gap:18px;
-                  padding:40px 56px 40px 460px; text-shadow:0 1px 0 #000, 0 10px 30px rgba(0,0,0,.45); }
-        .title{ font-size:112px; line-height:1; font-weight:1000; text-shadow:0 1px 0 #000, 0 18px 44px rgba(250,26,129,.35), 0 10px 32px rgba(181,126,255,.28); }
-        .bar{ height:6px; width:260px; border-radius:999px; margin-top:8px; background:linear-gradient(90deg,var(--pink),var(--violet),var(--cyan));
-               box-shadow:0 8px 22px rgba(181,126,255,.35); opacity:.9; }
-        .who{ font-size:84px; font-weight:1000; line-height:1.06; }
-        .chips{ display:flex; flex-wrap:wrap; gap:20px; margin-top:6px; }
-        .chip{ display:flex; align-items:baseline; gap:12px; padding:14px 22px; border-radius:999px; font-size:36px; font-weight:900;
-               color:#fff; border:3px solid rgba(255,255,255,.28);
-               background:linear-gradient(180deg, rgba(255,255,255,.16), rgba(15,15,18,.35));
-               box-shadow:0 14px 34px rgba(0,0,0,.42), inset 0 1px 6px rgba(255,255,255,.20), inset 0 -14px 24px rgba(0,0,0,.30); }
-        .k{ opacity:.85; font-weight:800; } .v{ font-weight:1000; }
-        .tagline{ font-size:40px; font-weight:1000; margin-top:4px; }
-        .wm{ position:absolute; right:26px; bottom:20px; padding:10px 18px; border-radius:999px; color:#ff51b3; font-weight:1000; letter-spacing:.4px; font-size:20px;
-             border:1.6px solid rgba(255,85,170,.55); background:linear-gradient(180deg, rgba(255,120,195,.18), rgba(0,0,0,.24));
-             box-shadow:0 8px 18px rgba(0,0,0,.32), 0 0 18px rgba(255,85,170,.35), inset 0 1px 6px rgba(255,255,255,.18); }
-        .loading{ position:absolute; right:12px; bottom:12px; background:rgba(0,0,0,.5); padding:6px 10px; border-radius:8px; font-weight:900; }
-
-        .dock{ width:min(1500px,100%); display:flex; flex-wrap:wrap; gap:14px; justify-content:center; padding:16px;
-               border-radius:18px; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); backdrop-filter:blur(10px) saturate(1.1); }
-        .btn{ display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:12px 16px; border-radius:999px; color:#fff; font-weight:1000;
-              border:1px solid rgba(255,255,255,.24); background:rgba(255,255,255,.12); cursor:pointer; transition:transform .12s, box-shadow .2s, background .2s; }
-        .btn:hover{ transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
-        .btn-primary{ background:linear-gradient(90deg,#fa1a81,#b57eff); border-color:rgba(255,255,255,.28); box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28); }
-        .btn-x{ background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%); border-color:rgba(255,255,255,.22); }
-        @media (max-width:900px){
-          .content{ padding:30px; } .title{ font-size:64px; } .who{ font-size:48px; }
-          .chip{ font-size:22px; padding:10px 14px; border-width:2px; } .tagline{ font-size:24px; }
-          .btn{ width:100%; }
+        .page {
+          min-height: 100vh;
+          display: grid;
+          grid-template-rows: 1fr auto;
+          background: radial-gradient(1200px 700px at 30% 0%, #1b0b1d 0%, #0c0b10 55%, #0a0a0f 100%);
+          color: #fff;
+        }
+        .stage {
+          position: relative;
+          width: 100%;
+          max-width: 1200px;
+          aspect-ratio: 3 / 1;
+          margin: 24px auto 0;
+          border-radius: 18px;
+          overflow: hidden;
+          box-shadow: 0 10px 38px rgba(0, 0, 0, 0.45);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: #0b0910;
+        }
+        .bg,
+        .bg-fallback {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        .bg-fallback {
+          background: radial-gradient(1200px 700px at 30% 0%, #1b0b1d, #0c0b10 55%, #0a0a0f);
+        }
+        .content {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          grid-template-rows: auto auto auto 1fr;
+          align-content: center;
+          padding: 40px 56px;
+          gap: 22px;
+          background: linear-gradient(to bottom, rgba(8, 6, 10, 0.15), rgba(8, 6, 10, 0.35));
+        }
+        .title {
+          font-size: clamp(36px, 9vw, 108px);
+          font-weight: 1000;
+          line-height: 0.95;
+          text-shadow: 0 0 24px rgba(255, 0, 128, 0.35);
+        }
+        .name {
+          font-size: clamp(28px, 6vw, 72px);
+          font-weight: 1000;
+          line-height: 1;
+        }
+        .stats {
+          display: flex;
+          gap: 18px;
+          flex-wrap: wrap;
+        }
+        .pill {
+          padding: 12px 18px;
+          border-radius: 999px;
+          font-weight: 1000;
+          background: rgba(0, 0, 0, 0.42);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          box-shadow: inset 0 0 30px rgba(255, 255, 255, 0.05);
+        }
+        .tagline {
+          align-self: end;
+          font-size: clamp(18px, 3vw, 40px);
+          font-weight: 1000;
+        }
+        .wm {
+          position: absolute;
+          right: 24px;
+          bottom: 24px;
+          font-weight: 1000;
+          color: #ffb6e6;
+          background: rgba(0, 0, 0, 0.35);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          padding: 10px 16px;
+          border-radius: 999px;
+          backdrop-filter: blur(6px);
+        }
+        .loading {
+          margin-left: 8px;
+          opacity: 0.85;
+        }
+        .dock {
+          display: flex;
+          gap: 14px;
+          flex-wrap: wrap;
+          justify-content: center;
+          padding: 18px 16px 26px;
+          background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.04));
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .dock button {
+          color: #fff;
+          background: rgba(255, 255, 255, 0.12);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          padding: 12px 16px;
+          border-radius: 999px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+        .dock button:hover {
+          background: rgba(255, 255, 255, 0.18);
         }
       `}</style>
     </>
