@@ -1,3 +1,4 @@
+// src/pages/leaderboard.js
 import { useEffect, useRef, useState, useLayoutEffect, useMemo } from "react";
 import Head from "next/head";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -18,7 +19,7 @@ const HAS_SUPABASE =
 /* ---------- localStorage keys ---------- */
 const LS_GUEST_ID_KEY = "crush_guest_id";
 const LS_DISPLAY_NAME_KEY = "crush_display_name";
-const LS_NAME_OWNER_KEY = "crush_name_owner";
+const LS_NAME_OWNER_KEY = "crush_name_owner"; // binds name -> (wallet or guest)
 
 /* ---------- UI guards ---------- */
 const SOFT_BAN = [
@@ -30,7 +31,7 @@ const RESERVED_EXACT = ["anonymous","guest","user","null","undefined"];
 /* ---------- SETTINGS ---------- */
 const HIDE_ANON_GUEST_ROWS = true;
 
-/* ---------- Demo data (fallback) ---------- */
+/* ---------- Demo leaderboard (alpha fallback) ---------- */
 const DEMO_FLIRTS = [
   { wallet: "9xp1demo1111111111111111111111111111111", name: "VelvetVibes", xp: 4200, level: 7 },
   { wallet: "9xp2demo2222222222222222222222222222222", name: "HeartSpark", xp: 3100, level: 6 },
@@ -80,6 +81,8 @@ function formatPercentile(rank, total){
   return String(Math.max(1, Math.round(p)));
 }
 const canon = (s) => (s || "").trim().toLowerCase();
+
+/* Add UTM params to links for clean analytics */
 function withUTM(url, params){
   try{
     const base = typeof window !== "undefined" ? window.location.origin : "https://example.com";
@@ -89,7 +92,7 @@ function withUTM(url, params){
   }catch{ return url; }
 }
 
-/* ---------- Supabase: confirm name ownership ---------- */
+/* ---------- Supabase: who owns a name? ---------- */
 async function getNameOwner(name) {
   if (!HAS_SUPABASE || !name) return null;
   try {
@@ -112,6 +115,7 @@ export default function LeaderboardPage(){
   const [guestId,setGuestId] = useState(null);
   const [storedDisplayName,setStoredDisplayName] = useState("");
 
+  // Seed guest id and read locally stored name, but only if it belongs to this identity
   useEffect(()=>{
     if(typeof window!=="undefined"){
       const gid=ensureGuestId();
@@ -126,7 +130,7 @@ export default function LeaderboardPage(){
 
   const myIdentifier = myWallet || guestId || null;
 
-  /* ---------- Holders ---------- */
+  /* ---------- Holders (server first, Helius fallback) ---------- */
   const [holders,setHolders] = useState([]);
   const [allHolders,setAllHolders] = useState([]);
   const [holdersLoading,setHoldersLoading] = useState(true);
@@ -134,6 +138,7 @@ export default function LeaderboardPage(){
   async function fetchTopHolders(){
     try{
       setHoldersLoading(true);
+      // Prefer server API
       if (CRUSH_MINT) {
         try {
           const r = await fetch(`/api/holders/top?mint=${encodeURIComponent(CRUSH_MINT)}&limit=25`);
@@ -145,6 +150,7 @@ export default function LeaderboardPage(){
           }
         } catch(_) {}
       }
+      // Fallback to Helius if configured
       if(!CRUSH_MINT || !HELIUS_API_KEY || !HELIUS_RPC_URL){
         setHolders([]); setAllHolders([]); return;
       }
@@ -185,7 +191,7 @@ export default function LeaderboardPage(){
     }
   }
 
-  /* ---------- Flirts ---------- */
+  /* ---------- Flirts (XP leaderboard via server API) ---------- */
   const [flirts,setFlirts] = useState([]);
   const [allFlirts,setAllFlirts] = useState([]);
   const [flirtsLoading,setFlirtsLoading] = useState(true);
@@ -232,6 +238,7 @@ export default function LeaderboardPage(){
           rows.push({ wallet: meId, name: meName || null, xp: 1200, level: 3 });
         }
 
+        // If my row has a name, only keep it if DB confirms I own it
         if (myIdentifier && HAS_SUPABASE) {
           const i = rows.findIndex(r => r.wallet === myIdentifier && r.name);
           if (i >= 0) {
@@ -262,6 +269,7 @@ export default function LeaderboardPage(){
         rows = rows.slice().sort((a,b)=> (Number(b.xp)||0)-(Number(a.xp)||0));
       }
 
+      // shine when xp goes up
       rows.forEach(r => {
         const prev = prevXp.current.get(r.wallet) || 0;
         if ((r.xp || 0) > prev) {
@@ -283,7 +291,7 @@ export default function LeaderboardPage(){
     }
   }
 
-  /* ---------- Name editor ---------- */
+  /* ---------- Username (availability + save) ---------- */
   const [nameDraft,setNameDraft] = useState("");
   const [nameSaving,setNameSaving] = useState(false);
   const [nameMsg,setNameMsg] = useState("");
@@ -307,6 +315,7 @@ export default function LeaderboardPage(){
     if(isEditingRef.current) return;
     const me = myIdentifier ? allFlirts.find(r=>r.wallet===myIdentifier) : null;
 
+    // Only seed the local name if it is owned by this identity
     const ownerOk =
       typeof window !== "undefined" &&
       (localStorage.getItem(LS_NAME_OWNER_KEY)||"") === (myIdentifier||"");
@@ -340,7 +349,7 @@ export default function LeaderboardPage(){
     }
   }, [allFlirts, myIdentifier, nameDraft, initialName]);
 
-  // Availability: DB first, then local list
+  // Availability: Supabase first (truth), then fallback to in-memory list
   const availReqIdRef = useRef(0);
   useEffect(()=>{
     if(!myIdentifier) return;
@@ -356,16 +365,20 @@ export default function LeaderboardPage(){
         setAvailState("checking");
         const target = canon(cleaned);
 
+        // DB check first
         let takenByOther = false;
         if (HAS_SUPABASE) {
           const owner = await getNameOwner(cleaned);
           takenByOther = !!owner && owner !== myIdentifier;
         }
+
+        // Fallback to local list if DB says free (covers preview/demo)
         if (!takenByOther) {
           takenByOther = (allFlirts || []).some(
             (r) => r.wallet !== myIdentifier && canon(r.name) === target
           );
         }
+
         if (availReqIdRef.current !== id) return;
         setAvailState(takenByOther ? "taken" : "available");
       }catch(e){
@@ -390,16 +403,20 @@ export default function LeaderboardPage(){
     try{
       const target = canon(cleaned);
 
+      // Double-check availability against DB
       let takenByOther = false;
       if (HAS_SUPABASE) {
         const owner = await getNameOwner(cleaned);
         takenByOther = !!owner && owner !== myIdentifier;
       }
+
+      // Also check current list as a fallback
       if (!takenByOther) {
         takenByOther = (allFlirts || []).some(
           (r) => r.wallet !== myIdentifier && canon(r.name) === target
         );
       }
+
       if (takenByOther) {
         setAvailState("taken");
         setNameMsg("Name is already taken.");
@@ -407,13 +424,16 @@ export default function LeaderboardPage(){
         return;
       }
 
+      // Bind name to this identity (local)
       localStorage.setItem(LS_DISPLAY_NAME_KEY, cleaned);
       localStorage.setItem(LS_NAME_OWNER_KEY, myIdentifier);
       setStoredDisplayName(cleaned);
 
+      // Update UI lists
       setAllFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
       setFlirts(list => list.map(r => r.wallet===myIdentifier ? {...r, name: cleaned} : r));
 
+      // Upsert to Supabase immediately (authoritative)
       if (HAS_SUPABASE) {
         try {
           await supabase.from("leaderboard").upsert(
@@ -499,7 +519,7 @@ export default function LeaderboardPage(){
     );
   }
 
-  /* ---------- Name + Share UI ---------- */
+  /* ---------- Combined Name + Share UI ---------- */
   function NameEditor(){
     const statusBadge =
       availState==="checking" ? <span className="chip info">Checking…</span> :
@@ -535,20 +555,20 @@ export default function LeaderboardPage(){
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
-    // Build card URL (RELATIVE bg path)
+    // --- Open X banner (1500x500) with stats overlaid
+    // IMPORTANT: pass a **relative** path so the page can load the image locally.
     const bannerParams = new URLSearchParams({
       name: (me?.name || shareId || "Anonymous"),
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
-      bg: "/brand/x-banner.png",
+      bg: "/brand/x-banner.png", // <= relative path fixes the banner rendering
     });
 
     const openBanner = () => {
       if (!shareId) return;
       const rel = `/x-card/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
-      const url = `${base}${rel}` || rel;
-      try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+      try { window.open(rel, "_blank", "noopener,noreferrer"); } catch {}
     };
 
     const copyShare = async () => {
@@ -617,8 +637,8 @@ export default function LeaderboardPage(){
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
               <span className="lbl">Copy link</span>
             </button>
-            {/* Open the X banner generator */}
-            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareId} title="Open X card">
+            {/* Open the X banner generator (relative bg path) */}
+            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareId} title="Open card">
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v12H4zM8 4h8v4H8zM9 10h6v6H9z"/></svg>
               <span className="lbl">Open card</span>
             </button>
@@ -746,7 +766,7 @@ export default function LeaderboardPage(){
         ))}
       </div>
 
-      <style jsx>{/* styles unchanged from your last working version (with small tweaks) */`
+      <style jsx>{`
         :root{
           --glow-cyan:#b5fffc; --glow-pink:#ffb6d5;
           --ink-100:#06121a; --panel:rgba(25, 5, 35, 0.58);
@@ -756,6 +776,8 @@ export default function LeaderboardPage(){
         @media (max-width:1024px){ .lb-container{ grid-template-columns:1fr; gap:32px; } }
         .lb-section h2{ margin:0 0 18px 6px; font-size:1.35rem; line-height:1.2; font-weight:900;
           color:#fff0fc; text-shadow:0 0 8px #fa1a81, 0 0 18px #ffb6d5; }
+
+        /* Rank pill */
         .hrl,.holders-rank-line{ display:inline-flex; align-items:baseline; gap:12px; padding:10px 14px; border-radius:999px;
           background:linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,.07));
           border:1.6px solid rgba(181,255,252,.6); box-shadow:0 0 26px rgba(181,255,252,.25), inset 0 0 12px rgba(181,255,252,.18);
@@ -770,6 +792,7 @@ export default function LeaderboardPage(){
         .hrl-cur{ margin-left:6px; font-weight:900; opacity:.9; }
         .hrl-sub{ font-weight:900; opacity:.88; }
 
+        /* Name & Share card */
         .ns-card{ display:grid; grid-template-columns: 1fr auto; gap:22px; margin:8px 6px 18px; padding:16px 18px;
           border-radius:20px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,.16); backdrop-filter: blur(8px) saturate(1.1); }
         @media (max-width:860px){ .ns-card{ grid-template-columns: 1fr; } }
@@ -787,32 +810,97 @@ export default function LeaderboardPage(){
         .ns-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
         @media (max-width:860px){ .ns-right{ align-items:flex-start; } }
         .share-title{ font-weight:900; color:#fff; opacity:.95; margin:2px 0 2px; }
+
+        /* Share group — even spacing */
         .share-group{ display:flex; flex-wrap:wrap; align-items:center; column-gap:18px; row-gap:12px; }
 
-        .cbtn{ display:inline-flex; align-items:center; justify-content:center; gap:10px; padding:12px 16px;
-          min-height:40px; border-radius:999px; border:1px solid rgba(255,255,255,.24); font-weight:1000; color:#fff;
-          background:rgba(255,255,255,.12); cursor:pointer; user-select:none; text-decoration:none; white-space:nowrap;
-          transition:transform .12s, box-shadow .2s, background .2s; }
-        .cbtn:hover:not(:disabled){ transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
-        .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
-        .cbtn-primary{ background:linear-gradient(90deg,#fa1a81,#b57eff); border-color:rgba(255,255,255,.28); box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28); }
-        .cbtn-x{ background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%); border-color:rgba(255,255,255,.22); }
+        /* Crush Buttons (collision-proof + focus/hover) */
+        .cbtn{
+          display:inline-flex !important;
+          flex-direction:row !important;
+          align-items:center !important;
+          justify-content:center !important;
+          gap:10px !important;
 
-        .lb-card{ border-radius:18px; padding:14px; background:rgba(25,5,35,.58); backdrop-filter:blur(12px) saturate(1.35);
-          border:1px solid rgba(255,255,255,.12); overflow:hidden; }
+          padding:12px 16px !important;
+          min-height:40px !important;
+          border-radius:999px !important;
+          border:1px solid rgba(255,255,255,.24) !important;
+
+          font: inherit !important;
+          font-weight:1000 !important;
+          letter-spacing:.2px !important;
+          line-height:1 !important;
+          color:#fff !important;
+          font-size:0.96rem !important;
+
+          background:rgba(255,255,255,.12) !important;
+          cursor:pointer !important;
+          user-select:none !important;
+          text-decoration:none !important;
+          white-space:nowrap !important;
+          vertical-align:middle !important;
+
+          transition:transform .12s ease, box-shadow .2s ease, background .2s ease, opacity .2s ease !important;
+        }
+        .cbtn:hover:not(:disabled){ transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
+        .cbtn:active:not(:disabled){ transform:translateY(0); }
+        .cbtn:disabled{ opacity:.55; cursor:not-allowed; }
+        .cbtn:focus-visible{ outline:3px solid rgba(181,255,252,.85); outline-offset:2px; box-shadow:0 0 0 6px rgba(181,255,252,.20); }
+        .cbtn-primary{ background:linear-gradient(90deg,#fa1a81,#b57eff); border-color:rgba(255,255,255,.28); box-shadow:0 0 18px rgba(250,26,129,.45), 0 10px 22px rgba(181,126,255,.28); }
+        .cbtn-primary:hover:not(:disabled){ box-shadow:0 16px 34px rgba(250,26,129,.55), 0 0 22px rgba(181,126,255,.45); }
+        .cbtn-x{ background:radial-gradient(140% 140% at 50% -20%, #000 0%, #171717 55%, #2a2a2a 100%); border-color:rgba(255,255,255,.22); }
+        .cbtn-ghost{ background:rgba(255,255,255,.12); }
+        .cbtn-outline{ background:transparent; border-color:rgba(255,255,255,.35); }
+
+        /* Icon + label inside button */
+        .ic{ width:20px !important; height:20px !important; display:inline-block !important; flex:0 0 20px !important; opacity:.92 !important; }
+        .lbl{ display:inline-block !important; line-height:1 !important; }
+
+        /* Mobile share buttons full width */
+        @media (max-width:560px){
+          .share-group .cbtn{ width:100% !important; justify-content:center !important; }
+        }
+
+        /* Table + rows */
+        .lb-card{ position:relative; border-radius:18px; padding:14px; background:var(--panel);
+          backdrop-filter:blur(12px) saturate(1.35); border:1px solid rgba(255,255,255,.12); overflow:hidden; }
         .lb-table{ color:#fff; }
-        .lb-row{ display:grid; grid-template-columns:64px 1fr 140px; align-items:center; padding:12px 14px; border-radius:12px; }
+        .lb-row{ display:grid; grid-template-columns:64px 1fr 140px; align-items:center; padding:12px 14px; border-radius:12px; line-height:1.35;
+          transition:transform .12s ease, background .18s ease, box-shadow .18s ease; }
+        .lb-row.rank-change{ animation:rise 120ms ease-out; }
+        @keyframes rise{ from{ transform:translateY(3px); opacity:.92 } to{ transform:translateY(0); opacity:1 } }
         .lb-head{ position:sticky; top:0; z-index:2; background:linear-gradient(90deg, rgba(250,26,129,.28), rgba(176,126,255,.28));
           border:1px solid rgba(255,255,255,.16); margin-bottom:10px; backdrop-filter: blur(8px); }
         .lb-th{ font-weight:900; color:#ffe9f6; letter-spacing:.2px; }
+        .lb-td{ color:#fff; }
         .lb-row:not(.lb-head):nth-child(even){ background:rgba(255,255,255,.04); }
-        .lb-row:not(.lb-head):hover{ background:rgba(250,26,129,.14); }
+        .lb-row:not(.lb-head):hover{ background:rgba(250,26,129,.14); transform:translateY(-1px); }
         .lb-name{ font-weight:900; margin-right:10px; }
         .lb-wallet{ font-size:.86rem; color:#ffd1ec99; }
         .w-10{ width:64px; } .w-28{ width:140px; } .w-32{ width:160px; }
-        .lb-me{ background:linear-gradient(90deg, rgba(181,255,252,.18), rgba(224,152,248,.18)); outline:1.5px solid rgba(181,255,252,.6); }
+        .text-right{ text-align:right; }
+        .lb-me{ background:linear-gradient(90deg, rgba(181,255,252,.18), rgba(224,152,248,.18)); outline:1.5px solid rgba(181,255,252,.6);
+          box-shadow:0 0 0 2px rgba(255,255,255,.08) inset, 0 0 18px rgba(181,255,252,.35); }
         .delta{ font-size:.78rem; margin-left:8px; padding:2px 6px; border-radius:999px; background:rgba(255,255,255,.12); }
         .delta.up{ color:#b5fffc; } .delta.down{ color:#ffb6d5; }
+
+        .copy-wallet{ cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+        .copy-wallet .cp{ opacity:.55; transition:opacity .15s ease, transform .15s ease; }
+        .copy-wallet:hover .cp{ opacity:.95; transform:translateY(-1px) scale(1.04); }
+
+        .shine{ position:relative; }
+        .shine::after{ content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,#ffffff66,transparent);
+          transform:translateX(-120%); animation:shine 700ms ease-out; }
+        @keyframes shine{ to{ transform:translateX(120%) } }
+
+        @media (max-width:380px){
+          .lb-card{ padding:10px; }
+          .lb-row{ padding:10px 10px; }
+          .cbtn{ padding:10px 14px !important; }
+          .ns-card{ padding:12px; }
+          .ns-input{ padding:10px 14px; }
+        }
 
         .toasts{ position: fixed; right: 14px; bottom: 14px; display:flex; flex-direction:column; gap:8px; z-index: 9999; }
         .toast{ background: rgba(25,25,28,.9); color:#fff; padding:10px 14px; border-radius:10px; font-weight:900; border:1px solid rgba(255,255,255,.18); }
@@ -848,6 +936,7 @@ function SkeletonRows({ cols=[10,0,28], rows=6 }){
     </>
   );
 }
+
 function EmptyRow({ text }){
   return (
     <div className="lb-row" role="row">
