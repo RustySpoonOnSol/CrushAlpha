@@ -549,23 +549,26 @@ export default function LeaderboardPage(){
       myWallet ||
       guestId ||
       "";
+
     const rawUrl = shareId ? `${base}/u/${encodeURIComponent(shareId)}` : "";
     const shareUrl = rawUrl
       ? withUTM(rawUrl, { utm_source: "share", utm_medium: "leaderboard", utm_campaign: "og_card" })
       : "";
 
-    // --- Open X banner (1500x500) with stats overlaid; same-origin PNG banner
+    // --- Open X banner (1500x500) with stats overlaid; PNG banner
     const bannerParams = new URLSearchParams({
       name: (me?.name || shareId || "Anonymous"),
       xp: String(me?.xp || 0),
       rank: String(me?._rank || ""),
       pct: `Top ${myPercentile}%`,
-      bg: `${base}/brand/x-banner.png`, // /public/brand/x-banner.png
+      bg: `${base}/brand/x-banner.png`, // /public/brand/x-banner.png (works even if base="")
     });
+
     const openBanner = () => {
       if (!shareId) return;
-      const path = `/api/x-banner/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
-      window.open(path, "_blank", "noopener,noreferrer");
+      const rel = `/x-card/${encodeURIComponent(shareId)}?${bannerParams.toString()}`;
+      const url = `${base}${rel}` || rel;
+      try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
     };
 
     const copyShare = async () => {
@@ -635,7 +638,8 @@ export default function LeaderboardPage(){
               <span className="lbl">Copy link</span>
             </button>
             {/* Open the X banner generator */}
-            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareUrl} title="Open X card">
+            {/* CHANGE #1: enable based on shareId (not shareUrl) */}
+            <button className="cbtn cbtn-outline" onClick={openBanner} disabled={!shareId} title="Open X card">
               <svg className="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v12H4zM8 4h8v4H8zM9 10h6v6H9z"/></svg>
               <span className="lbl">Open card</span>
             </button>
