@@ -7,7 +7,6 @@ function sanitizeBg(s) {
   if (!s) return "";
   try {
     const dec = decodeURIComponent(s);
-    // allow /relative OR http(s)
     if (/^https?:\/\//i.test(dec) || dec.startsWith("/")) return dec;
   } catch {}
   return "";
@@ -17,14 +16,13 @@ export default function XBannerCard() {
   const router = useRouter();
   const { id = "anon" } = router.query;
 
-  // --- read params
   const name = (router.query.name || id || "Anonymous").toString();
   const xp = Number(router.query.xp || 0);
   const rank = router.query.rank ? `#${router.query.rank}` : "#?";
   const pct = (router.query.pct || "Top 100%").toString();
   const bgParam = sanitizeBg((router.query.bg || "").toString());
 
-  // --- banner fallback chain
+  // ---- banner fallback chain (relative first)
   const bgCandidates = useMemo(() => {
     const arr = [];
     if (bgParam) arr.push(bgParam);
@@ -36,16 +34,14 @@ export default function XBannerCard() {
   const [bgReady, setBgReady] = useState(false);
   const [bgFailed, setBgFailed] = useState(false);
 
-  const curBg = bgCandidates[bgIdx] || ""; // if empty, we'll draw gradient
+  const curBg = bgCandidates[bgIdx] || "";
 
   useEffect(() => {
-    // reset when params change
     setBgIdx(0);
     setBgReady(false);
     setBgFailed(false);
   }, [bgCandidates.join("|")]);
 
-  // If image errors, advance the chain; if we exhaust, mark failed
   const onBgError = () => {
     if (bgIdx < bgCandidates.length - 1) {
       setBgIdx((i) => i + 1);
@@ -55,11 +51,9 @@ export default function XBannerCard() {
     }
   };
 
-  // Build a sharable page URL (used by Copy / Share)
   const pageUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    const u = new URL(window.location.href);
-    return u.toString();
+    return window.location.href;
   }, [router.asPath]);
 
   const copy = async (text) => {
@@ -79,23 +73,127 @@ export default function XBannerCard() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  // Download PNG using the viewport (simple, no extra deps)
-  const wrapRef = useRef(null);
-  const downloadPng = async () => {
-    try {
-      const domtoimage = (await import("html-to-image")).toPng;
-      const dataUrl = await domtoimage(wrapRef.current, {
-        pixelRatio: 2,
-        cacheBust: true,
+  // ---- Download PNG: draw a 1500x500 banner with Canvas (no deps)
+  async function downloadPng() {
+    const W = 1500, H = 500;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+
+    // helpers
+    const loadImage = (src) =>
+      new Promise((resolve, reject) => {
+        if (!src) return reject(new Error("no src"));
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
       });
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = "crush-card.png";
-      a.click();
-    } catch (e) {
-      alert("Could not render PNG here. Use mobile share instead.");
+
+    const roundRect = (x, y, w, h, r = 28) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+
+    // background
+    let drewImg = false;
+    try {
+      if (curBg) {
+        const img = await loadImage(curBg);
+        // cover
+        const ratio = Math.max(W / img.width, H / img.height);
+        const iw = img.width * ratio, ih = img.height * ratio;
+        const ix = (W - iw) / 2, iy = (H - ih) / 2;
+        ctx.drawImage(img, ix, iy, iw, ih);
+        drewImg = true;
+      }
+    } catch (_) {}
+
+    if (!drewImg) {
+      const grad = ctx.createRadialGradient(450, 0, 50, 450, 0, 1200);
+      grad.addColorStop(0, "#1b0b1d");
+      grad.addColorStop(0.55, "#0c0b10");
+      grad.addColorStop(1, "#0a0a0f");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
     }
-  };
+
+    // subtle dark overlay for readability
+    const overlay = ctx.createLinearGradient(0, 0, 0, H);
+    overlay.addColorStop(0, "rgba(8,6,10,0.25)");
+    overlay.addColorStop(1, "rgba(8,6,10,0.55)");
+    ctx.fillStyle = overlay;
+    ctx.fillRect(0, 0, W, H);
+
+    // Title
+    ctx.fillStyle = "#fff";
+    ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(255,0,128,0.35)";
+    ctx.shadowBlur = 24;
+
+    ctx.font = "900 130px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText("Crush AI", 80, 50);
+
+    // Name
+    ctx.shadowBlur = 0;
+    ctx.font = "900 86px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText(name, 80, 200);
+
+    // Stat pills
+    const pill = (label, x, y) => {
+      const padX = 26, padY = 14;
+      ctx.font = "900 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      const w = ctx.measureText(label).width + padX * 2;
+      const h = 72;
+      ctx.fillStyle = "rgba(0,0,0,0.42)";
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 2;
+      roundRect(x, y, w, h, 32);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, x + padX, y + 12);
+      return x + w + 18;
+    };
+    let x = 80, y = 310;
+    x = pill(`XP: ${xp.toLocaleString()}`, x, y);
+    x = pill(`Rank: ${rank}`, x, y);
+    pill(`Percentile: ${pct}`, x, y);
+
+    // Tagline
+    ctx.font = "900 46px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "#fff";
+    ctx.fillText("Chat. Flirt. Climb.", 80, 410);
+
+    // watermark
+    ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "#ffb6e6";
+    const wm = "crushai.fun";
+    const wmW = ctx.measureText(wm).width;
+    const pad = 18;
+    // bubble
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    roundRect(W - wmW - pad * 2 - 24, H - 54, wmW + pad * 2, 40, 20);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffb6e6";
+    ctx.fillText(wm, W - wmW - pad - 20, H - 48);
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = "crush-card.png";
+    a.click();
+  }
+
+  const wrapRef = useRef(null);
 
   return (
     <>
@@ -106,7 +204,6 @@ export default function XBannerCard() {
 
       <div className="page">
         <div className="stage" ref={wrapRef}>
-          {/* Background image/fallback */}
           {!bgFailed && curBg ? (
             <img
               src={curBg}
@@ -120,28 +217,22 @@ export default function XBannerCard() {
             <div className="bg-fallback" />
           )}
 
-          {/* Content overlay */}
           <div className="content">
             <div className="title">Crush AI</div>
             <div className="name">{name}</div>
-
             <div className="stats">
               <div className="pill">XP: {xp.toLocaleString()}</div>
               <div className="pill">Rank: {rank}</div>
               <div className="pill">Percentile: {pct}</div>
             </div>
-
             <div className="tagline">Chat. Flirt. Climb.</div>
 
-            {/* watermark (shows Loading… until bg settles) */}
             <div className="wm">
-              crushai.fun
-              {!bgReady && <span className="loading"> Loading…</span>}
+              crushai.fun{!bgReady && <span className="loading"> Loading…</span>}
             </div>
           </div>
         </div>
 
-        {/* Share dock */}
         <div className="dock">
           <button onClick={shareToX}>Share on X</button>
           <button onClick={() => copy(pageUrl)}>Copy page link</button>
