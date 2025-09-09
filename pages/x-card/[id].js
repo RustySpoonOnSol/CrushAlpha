@@ -3,7 +3,7 @@ import Head from "next/head";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 
-/* ---------- helpers ---------- */
+/* ---------------- helpers ---------------- */
 function sanitizeBg(s) {
   if (!s) return "";
   try {
@@ -17,14 +17,14 @@ export default function XBannerCard() {
   const router = useRouter();
   const { id = "anon" } = router.query;
 
-  // params
+  // params (keep all existing semantics)
   const name = (router.query.name || id || "Anonymous").toString();
   const xp = Number(router.query.xp || 0);
   const rank = router.query.rank ? `#${router.query.rank}` : "#?";
   const pct = (router.query.pct || "Top 100%").toString();
   const bgParam = sanitizeBg((router.query.bg || "").toString());
 
-  // banner fallbacks (relative paths preferred for CORS-safe canvas export)
+  // banner fallbacks (relative > absolute for CORS-safe canvas exports)
   const bgCandidates = useMemo(() => {
     const arr = [];
     if (bgParam) arr.push(bgParam);
@@ -44,15 +44,11 @@ export default function XBannerCard() {
   }, [bgCandidates.join("|")]);
 
   const onBgError = () => {
-    if (bgIdx < bgCandidates.length - 1) setBgIdx((i) => i + 1);
-    else {
-      setBgFailed(true);
-      setBgReady(true);
-    }
+    if (bgIdx < bgCandidates.length - 1) setBgIdx(i => i + 1);
+    else { setBgFailed(true); setBgReady(true); }
   };
 
-  const pageUrl =
-    typeof window !== "undefined" ? window.location.href : "";
+  const pageUrl = typeof window !== "undefined" ? window.location.href : "";
 
   const copy = async (text) => {
     try { await navigator.clipboard.writeText(text); alert("Copied!"); }
@@ -65,10 +61,10 @@ export default function XBannerCard() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  /* ---------- Canvas export (RETINA 2×, no deps) ---------- */
+  /* ---------- Canvas export (RETINA, no deps) ---------- */
   async function downloadPng() {
     const W = 1500, H = 500;
-    const SCALE = Math.max(2, Math.min(3, (window.devicePixelRatio || 1) * 2)); // crisp
+    const SCALE = Math.max(2, Math.min(3, (window.devicePixelRatio || 1) * 2));
     const canvas = document.createElement("canvas");
     canvas.width = W * SCALE; canvas.height = H * SCALE;
     const ctx = canvas.getContext("2d");
@@ -97,6 +93,7 @@ export default function XBannerCard() {
       }
     } catch {}
 
+    // fallback gradient if not drawn
     if (!drewImg) {
       const grad = ctx.createRadialGradient(450, 0, 50, 450, 0, 1200);
       grad.addColorStop(0, "#1b0b1d");
@@ -113,7 +110,7 @@ export default function XBannerCard() {
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
 
-    // typography + pills — compact so nothing clips
+    // headline
     ctx.fillStyle = "#fff";
     ctx.textBaseline = "top";
     ctx.shadowColor = "rgba(255, 0, 160, 0.45)";
@@ -121,6 +118,7 @@ export default function XBannerCard() {
     ctx.font = "900 108px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText("Crush AI", 72, 46);
 
+    // underline
     const ugrad = ctx.createLinearGradient(72, 0, 420, 0);
     ugrad.addColorStop(0, "#ff70d9");
     ugrad.addColorStop(1, "#6fd3ff");
@@ -128,10 +126,12 @@ export default function XBannerCard() {
     ctx.shadowBlur = 0;
     ctx.fillRect(72, 170, 320, 6);
 
+    // name
     ctx.fillStyle = "#ffffff";
     ctx.font = "900 70px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText(name, 72, 196);
 
+    // pills
     const round = (x, y, w, h, r = 26) => {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -150,17 +150,10 @@ export default function XBannerCard() {
       g.addColorStop(0, "rgba(255,255,255,0.08)");
       g.addColorStop(1, "rgba(255,255,255,0.04)");
       ctx.fillStyle = "rgba(5,5,12,0.55)";
-      round(x, y, w, h, 30);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = g;
-      round(x, y, w, h, 30);
-      ctx.fill();
-
-      ctx.fillStyle = "#fff";
-      ctx.fillText(label, x + padX, y + 12);
+      round(x, y, w, h, 30); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = g; round(x, y, w, h, 30); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.fillText(label, x + padX, y + 12);
       return x + w + 16;
     };
     let X = 72, Y = 282;
@@ -168,10 +161,12 @@ export default function XBannerCard() {
     X = pill(`Rank: ${rank}`, X, Y);
     pill(`Percentile: ${pct}`, X, Y);
 
+    // tagline
     ctx.font = "900 36px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#fff";
     ctx.fillText("Chat. Flirt. Climb.", 72, 370);
 
+    // watermark
     const wmText = "crushai.fun";
     ctx.font = "900 26px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     const wmW = ctx.measureText(wmText).width;
@@ -179,8 +174,8 @@ export default function XBannerCard() {
     const bx = W - wmW - pad * 2 - 40;
     const by = H - 50;
     round(bx, by, wmW + pad * 2, 36, 20);
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.stroke();
     ctx.fillStyle = "#ffb6e6";
     ctx.fillText(wmText, bx + pad, by + 7);
 
@@ -196,7 +191,7 @@ export default function XBannerCard() {
       <Head>
         <title>Crush AI — Card</title>
         <meta name="robots" content="noindex" />
-        {/* preload banner paths to avoid flashes on slow nets */}
+        {/* Preload banner paths to avoid flashes on slow nets */}
         <link rel="preload" as="image" href="/brand/x-banner.png" />
         <link rel="preload" as="image" href="/images/x-banner.png" />
       </Head>
@@ -214,9 +209,11 @@ export default function XBannerCard() {
               src={curBg}
               alt=""
               className="bg"
+              decoding="async"
+              fetchpriority="high"
+              crossOrigin="anonymous"
               onLoad={() => setBgReady(true)}
               onError={onBgError}
-              crossOrigin="anonymous"
             />
           ) : (
             <div className="bg-fallback" />
@@ -230,7 +227,7 @@ export default function XBannerCard() {
             <div className="stats">
               <div className="pill">XP: {xp.toLocaleString()}</div>
               <div className="pill">Rank: {rank}</div>
-              <div className="pill">Percentile: {pct}</div>
+              <div className="pill pill-wide">Percentile: {pct}</div>
             </div>
 
             <div className="tagline">Chat. Flirt. Climb.</div>
@@ -240,6 +237,7 @@ export default function XBannerCard() {
               {!bgReady && <span className="loading"> Loading…</span>}
             </div>
           </div>
+
           <div className="edge" />
         </div>
 
@@ -247,9 +245,7 @@ export default function XBannerCard() {
         <div className="dock">
           <button onClick={shareToX}>Share on X</button>
           <button onClick={() => copy(pageUrl)}>Copy page link</button>
-          <button onClick={() => copy(curBg || "/brand/x-banner.png")}>
-            Copy image URL
-          </button>
+          <button onClick={() => copy(curBg || "/brand/x-banner.png")}>Copy image URL</button>
           <button onClick={downloadPng}>Download PNG</button>
           <button
             onClick={async () => {
@@ -284,13 +280,12 @@ export default function XBannerCard() {
         .stage {
           position: relative;
           width: min(1200px, 95vw);
-          aspect-ratio: 2.9 / 1; /* slightly taller for safe fit */
+          aspect-ratio: 2.9 / 1;        /* desktop/tablet */
           border-radius: 22px;
           overflow: hidden;
           background: #0b0910;
-          box-shadow:
-            0 10px 35px rgba(0,0,0,0.45),
-            0 0 0 1px rgba(255,255,255,0.06) inset;
+          box-shadow: 0 10px 35px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06) inset;
+          will-change: transform;
         }
         .edge {
           position: absolute; inset: 0; pointer-events: none; border-radius: 22px;
@@ -303,22 +298,14 @@ export default function XBannerCard() {
         .glow-pink { width: 340px; height: 340px; left: -60px; top: -60px; background: #ff3bbd; }
         .glow-cyan { width: 360px; height: 360px; right: -80px; bottom: -80px; background: #22ccff; }
 
-        /* subtle grain/film overlay */
         .grain {
           position:absolute; inset:0; pointer-events:none; opacity:.05; mix-blend-mode:overlay;
-          background-image: url("data:image/svg+xml;utf8,\
-<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>\
-<filter id='n' x='0' y='0'>\
-<feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/>\
-<feComponentTransfer><feFuncA type='linear' slope='0.35'/></feComponentTransfer>\
-</filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n' x='0' y='0'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feComponentTransfer><feFuncA type='linear' slope='0.35'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
           background-size: 140px 140px;
         }
 
         .bg, .bg-fallback { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-        .bg-fallback {
-          background: radial-gradient(1200px 700px at 30% 0%, #1b0b1d 0%, #0c0b10 55%, #0a0a0f 100%);
-        }
+        .bg-fallback { background: radial-gradient(1200px 700px at 30% 0%, #1b0b1d 0%, #0c0b10 55%, #0a0a0f 100%); }
 
         .content {
           position: absolute; inset: 0;
@@ -334,10 +321,15 @@ export default function XBannerCard() {
           margin: 0; font-weight: 1000; line-height: 0.95;
           text-shadow: 0 0 24px rgba(255,0,160,0.35), 0 0 12px rgba(255,255,255,0.15);
           animation: pulseGlow 6s ease-in-out infinite;
+          text-wrap: balance;
         }
         @keyframes pulseGlow {
           0%,100% { text-shadow: 0 0 18px rgba(255,0,160,0.28), 0 0 8px rgba(255,255,255,0.12); }
           50% { text-shadow: 0 0 30px rgba(255,0,160,0.45), 0 0 16px rgba(255,255,255,0.20); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .title { animation: none; }
+          .underline { animation: none; }
         }
 
         .underline {
@@ -353,6 +345,7 @@ export default function XBannerCard() {
           font-size: clamp(24px, 5.4vw, 60px);
           margin: 0; font-weight: 1000; letter-spacing: 0.3px;
           text-shadow: 0 0 10px rgba(0,0,0,0.25);
+          word-break: break-word; overflow-wrap: anywhere; text-wrap: balance;
         }
 
         .stats { display: flex; gap: clamp(10px, 1.6vw, 18px); flex-wrap: wrap; margin-top: clamp(4px, 1vw, 8px); }
@@ -365,12 +358,16 @@ export default function XBannerCard() {
           border: 1px solid rgba(255,255,255,0.18);
           box-shadow: inset 0 14px 30px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.35);
           backdrop-filter: blur(6px);
+          white-space: nowrap;
         }
 
         .tagline {
-          align-self: end; font-size: clamp(16px, 2.8vw, 32px);
-          font-weight: 1000; text-shadow: 0 0 10px rgba(0,0,0,0.25);
+          align-self: end;
+          font-size: clamp(16px, 2.8vw, 32px);
+          font-weight: 1000;
+          text-shadow: 0 0 10px rgba(0,0,0,0.25);
           margin-top: clamp(4px, 1.2vw, 10px);
+          text-wrap: balance;
         }
 
         .wm {
@@ -402,13 +399,35 @@ export default function XBannerCard() {
         }
         .dock button:hover { background: rgba(255,255,255,0.18); }
 
-        /* Sticky, safe dock on mobile */
-        @media (max-width: 768px) {
+        /* ----- Mobile: god-tier polish ----- */
+        @media (max-width: 540px) {
+          .stage { aspect-ratio: 2.25 / 1; }       /* a touch taller for no clipping */
+          .content { padding: 16px; gap: 8px; }
+          .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+          }
+          .pill { font-size: 14px; padding: 8px 12px; white-space: nowrap; }
+          .pill-wide { grid-column: 1 / -1; }      /* Percentile spans full width */
+          .wm { font-size: 13px; padding: 7px 10px; right: 10px; bottom: 10px; }
           .dock {
             position: sticky;
             bottom: max(10px, env(safe-area-inset-bottom));
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-auto-rows: 44px;
+            gap: 10px;
+            padding: 10px;
+            border-radius: 14px;
             z-index: 10;
           }
+          .dock button { font-size: 15px; padding: 10px 12px; }
+        }
+
+        /* Tablet tighten-up */
+        @media (min-width: 541px) and (max-width: 900px) {
+          .stage { aspect-ratio: 2.6 / 1; }
         }
       `}</style>
     </>
