@@ -1,7 +1,7 @@
 // pages/x-card/[id].js
 import Head from "next/head";
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /* ---------- helpers ---------- */
 function sanitizeBg(s) {
@@ -104,14 +104,14 @@ export default function XBannerCard() {
       ctx.fillRect(0, 0, W, H);
     }
 
-    // ambient vignette for premium contrast
+    // ambient vignette
     const v = ctx.createLinearGradient(0, 0, 0, H);
     v.addColorStop(0, "rgba(6,6,10,0.20)");
     v.addColorStop(1, "rgba(6,6,10,0.45)");
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
 
-    // Title
+    // typography + pills (premium look)
     ctx.fillStyle = "#fff";
     ctx.textBaseline = "top";
     ctx.shadowColor = "rgba(255, 0, 160, 0.45)";
@@ -119,7 +119,6 @@ export default function XBannerCard() {
     ctx.font = "900 120px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText("Crush AI", 72, 46);
 
-    // underline (gradient)
     const ugrad = ctx.createLinearGradient(72, 0, 420, 0);
     ugrad.addColorStop(0, "#ff70d9");
     ugrad.addColorStop(1, "#6fd3ff");
@@ -127,12 +126,10 @@ export default function XBannerCard() {
     ctx.shadowBlur = 0;
     ctx.fillRect(72, 180, 360, 7);
 
-    // Name
     ctx.fillStyle = "#ffffff";
     ctx.font = "900 86px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillText(name, 72, 208);
 
-    // Stat pills
     const round = (x, y, w, h, r = 28) => {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -147,10 +144,9 @@ export default function XBannerCard() {
       const padX = 22;
       const w = ctx.measureText(label).width + padX * 2;
       const h = 70;
-      // glass gradient
       const g = ctx.createLinearGradient(0, y, 0, y + h);
-      g.addColorStop(0, "rgba(255,255,255,0.06)");
-      g.addColorStop(1, "rgba(255,255,255,0.03)");
+      g.addColorStop(0, "rgba(255,255,255,0.08)");
+      g.addColorStop(1, "rgba(255,255,255,0.04)");
       ctx.fillStyle = "rgba(5,5,12,0.55)";
       round(x, y, w, h, 32);
       ctx.fill();
@@ -170,12 +166,10 @@ export default function XBannerCard() {
     X = pill(`Rank: ${rank}`, X, Y);
     pill(`Percentile: ${pct}`, X, Y);
 
-    // Tagline
     ctx.font = "900 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     ctx.fillStyle = "#fff";
     ctx.fillText("Chat. Flirt. Climb.", 72, 392);
 
-    // watermark
     const wmText = "crushai.fun";
     ctx.font = "900 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     const wmW = ctx.measureText(wmText).width;
@@ -188,7 +182,6 @@ export default function XBannerCard() {
     ctx.fillStyle = "#ffb6e6";
     ctx.fillText(wmText, bx + pad, by + 8);
 
-    // download
     const dataUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = dataUrl;
@@ -204,12 +197,10 @@ export default function XBannerCard() {
       </Head>
 
       <div className="page">
+        {/* ROW 1: Card */}
         <div className="stage">
-          {/* ambient glows */}
           <div className="glow glow-pink" />
           <div className="glow glow-cyan" />
-
-          {/* background */}
           {!bgFailed && curBg ? (
             <img
               src={curBg}
@@ -223,7 +214,6 @@ export default function XBannerCard() {
             <div className="bg-fallback" />
           )}
 
-          {/* overlay content */}
           <div className="content">
             <h1 className="title">Crush AI</h1>
             <div className="underline" />
@@ -242,12 +232,10 @@ export default function XBannerCard() {
               {!bgReady && <span className="loading"> Loading…</span>}
             </div>
           </div>
-
-          {/* card chrome */}
           <div className="edge" />
         </div>
 
-        {/* share dock */}
+        {/* ROW 2: Dock (matches width of card; sits right below it) */}
         <div className="dock">
           <button onClick={shareToX}>Share on X</button>
           <button onClick={() => copy(pageUrl)}>Copy page link</button>
@@ -268,21 +256,27 @@ export default function XBannerCard() {
 
       <style jsx>{`
         :global(html, body) { background:#09080d; }
+
+        /* NEW: two auto rows so there is NO giant filler space */
         .page {
           min-height: 100vh;
           display: grid;
-          grid-template-rows: 1fr auto;
+          grid-template-rows: auto auto; /* <— key change */
+          align-content: start;
+          row-gap: clamp(10px, 1.8vh, 18px); /* tasteful gap between card & dock */
+          justify-items: center;
           color: #fff;
+          padding: clamp(14px, 2vh, 22px) 0;
           background:
             radial-gradient(800px 500px at 20% -10%, rgba(255, 0, 160, 0.12), transparent 60%),
             radial-gradient(900px 560px at 90% -20%, rgba(0, 160, 255, 0.12), transparent 60%),
             #09080d;
         }
+
         .stage {
           position: relative;
           width: min(1200px, 95vw);
           aspect-ratio: 3 / 1;
-          margin: 28px auto 10px;
           border-radius: 22px;
           overflow: hidden;
           background: #0b0910;
@@ -299,17 +293,11 @@ export default function XBannerCard() {
             0 0 40px rgba(255,0,160,0.12) inset,
             0 0 40px rgba(0,160,255,0.10) inset;
         }
-        .glow {
-          position: absolute; filter: blur(60px); opacity: 0.5; pointer-events: none;
-        }
+        .glow { position: absolute; filter: blur(60px); opacity: 0.5; pointer-events: none; }
         .glow-pink { width: 340px; height: 340px; left: -60px; top: -60px; background: #ff3bbd; }
         .glow-cyan { width: 360px; height: 360px; right: -80px; bottom: -80px; background: #22ccff; }
 
-        .bg, .bg-fallback {
-          position: absolute; inset: 0;
-          width: 100%; height: 100%;
-          object-fit: cover;
-        }
+        .bg, .bg-fallback { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
         .bg-fallback {
           background: radial-gradient(1200px 700px at 30% 0%, #1b0b1d 0%, #0c0b10 55%, #0a0a0f 100%);
         }
@@ -319,16 +307,15 @@ export default function XBannerCard() {
           display: grid;
           grid-template-rows: auto auto auto 1fr;
           align-content: center;
-          padding: clamp(20px, 4vw, 56px);
-          gap: clamp(12px, 2.2vw, 22px);
+          padding: clamp(18px, 4vw, 56px);
+          gap: clamp(10px, 2.2vw, 22px);
           background: linear-gradient(to bottom, rgba(8,6,10,0.15), rgba(8,6,10,0.40));
         }
-
         .title {
           font-size: clamp(42px, 9.2vw, 110px);
-          line-height: 0.95;
           margin: 0;
           font-weight: 1000;
+          line-height: 0.95;
           text-shadow:
             0 0 24px rgba(255,0,160,0.35),
             0 0 12px rgba(255,255,255,0.15);
@@ -347,10 +334,7 @@ export default function XBannerCard() {
           text-shadow: 0 0 10px rgba(0,0,0,0.25);
         }
 
-        .stats {
-          display: flex; gap: clamp(10px, 1.6vw, 18px); flex-wrap: wrap;
-          margin-top: clamp(6px, 1.2vw, 8px);
-        }
+        .stats { display: flex; gap: clamp(10px, 1.6vw, 18px); flex-wrap: wrap; margin-top: clamp(6px, 1.2vw, 8px); }
         .pill {
           --padX: clamp(14px, 1.8vw, 22px);
           padding: 12px var(--padX);
@@ -358,21 +342,13 @@ export default function XBannerCard() {
           font-weight: 1000;
           font-size: clamp(14px, 2.2vw, 24px);
           color: #fff;
-          background:
-            linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+          background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
           border: 1px solid rgba(255,255,255,0.18);
-          box-shadow:
-            inset 0 14px 30px rgba(255,255,255,0.06),
-            0 4px 16px rgba(0,0,0,0.35);
+          box-shadow: inset 0 14px 30px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.35);
           backdrop-filter: blur(6px);
         }
 
-        .tagline {
-          align-self: end;
-          font-size: clamp(18px, 3.3vw, 42px);
-          font-weight: 1000;
-          text-shadow: 0 0 10px rgba(0,0,0,0.25);
-        }
+        .tagline { align-self: end; font-size: clamp(18px, 3.3vw, 42px); font-weight: 1000; text-shadow: 0 0 10px rgba(0,0,0,0.25); }
 
         .wm {
           position: absolute; right: clamp(14px, 2vw, 24px); bottom: clamp(14px, 2vw, 24px);
@@ -384,11 +360,16 @@ export default function XBannerCard() {
         }
         .loading { margin-left: 8px; opacity: 0.85; }
 
+        /* Dock now hugs the card, same width, with glass look */
         .dock {
-          display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
-          padding: 18px 16px 26px;
-          background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04));
-          border-top: 1px solid rgba(255,255,255,0.08);
+          width: min(1200px, 95vw);
+          display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+          padding: 12px;
+          border-radius: 16px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+          border: 1px solid rgba(255,255,255,0.18);
+          box-shadow: 0 8px 26px rgba(0,0,0,0.35);
+          backdrop-filter: blur(8px);
         }
         .dock button {
           color: #fff; font-weight: 900; cursor: pointer;
