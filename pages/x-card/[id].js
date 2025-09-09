@@ -65,12 +65,14 @@ export default function XBannerCard() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  /* ---------- Canvas export (no deps) ---------- */
+  /* ---------- Canvas export (RETINA 2×, no deps) ---------- */
   async function downloadPng() {
     const W = 1500, H = 500;
+    const SCALE = Math.max(2, Math.min(3, (window.devicePixelRatio || 1) * 2)); // crisp
     const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
+    canvas.width = W * SCALE; canvas.height = H * SCALE;
     const ctx = canvas.getContext("2d");
+    ctx.scale(SCALE, SCALE);
 
     const loadImage = (src) =>
       new Promise((resolve, reject) => {
@@ -111,7 +113,7 @@ export default function XBannerCard() {
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
 
-    // typography + pills (premium look) — slightly smaller to guarantee fit
+    // typography + pills — compact so nothing clips
     ctx.fillStyle = "#fff";
     ctx.textBaseline = "top";
     ctx.shadowColor = "rgba(255, 0, 160, 0.45)";
@@ -194,13 +196,19 @@ export default function XBannerCard() {
       <Head>
         <title>Crush AI — Card</title>
         <meta name="robots" content="noindex" />
+        {/* preload banner paths to avoid flashes on slow nets */}
+        <link rel="preload" as="image" href="/brand/x-banner.png" />
+        <link rel="preload" as="image" href="/images/x-banner.png" />
       </Head>
 
       <div className="page">
         {/* Card */}
         <div className="stage">
+          {/* ambient glows + grain overlay */}
           <div className="glow glow-pink" />
           <div className="glow glow-cyan" />
+          <div className="grain" />
+
           {!bgFailed && curBg ? (
             <img
               src={curBg}
@@ -270,12 +278,13 @@ export default function XBannerCard() {
             radial-gradient(800px 500px at 20% -10%, rgba(255, 0, 160, 0.12), transparent 60%),
             radial-gradient(900px 560px at 90% -20%, rgba(0, 160, 255, 0.12), transparent 60%),
             #09080d;
+          padding-bottom: calc(22px + env(safe-area-inset-bottom));
         }
 
         .stage {
           position: relative;
           width: min(1200px, 95vw);
-          aspect-ratio: 2.9 / 1; /* a touch taller so nothing clips */
+          aspect-ratio: 2.9 / 1; /* slightly taller for safe fit */
           border-radius: 22px;
           overflow: hidden;
           background: #0b0910;
@@ -284,9 +293,7 @@ export default function XBannerCard() {
             0 0 0 1px rgba(255,255,255,0.06) inset;
         }
         .edge {
-          position: absolute; inset: 0;
-          pointer-events: none;
-          border-radius: 22px;
+          position: absolute; inset: 0; pointer-events: none; border-radius: 22px;
           box-shadow:
             0 0 0 1px rgba(255,255,255,0.08) inset,
             0 0 40px rgba(255,0,160,0.12) inset,
@@ -295,6 +302,18 @@ export default function XBannerCard() {
         .glow { position: absolute; filter: blur(60px); opacity: 0.5; pointer-events: none; }
         .glow-pink { width: 340px; height: 340px; left: -60px; top: -60px; background: #ff3bbd; }
         .glow-cyan { width: 360px; height: 360px; right: -80px; bottom: -80px; background: #22ccff; }
+
+        /* subtle grain/film overlay */
+        .grain {
+          position:absolute; inset:0; pointer-events:none; opacity:.05; mix-blend-mode:overlay;
+          background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>\
+<filter id='n' x='0' y='0'>\
+<feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/>\
+<feComponentTransfer><feFuncA type='linear' slope='0.35'/></feComponentTransfer>\
+</filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+          background-size: 140px 140px;
+        }
 
         .bg, .bg-fallback { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
         .bg-fallback {
@@ -311,25 +330,28 @@ export default function XBannerCard() {
           background: linear-gradient(to bottom, rgba(8,6,10,0.15), rgba(8,6,10,0.40));
         }
         .title {
-          font-size: clamp(36px, 7.8vw, 96px); /* down a notch */
-          margin: 0;
-          font-weight: 1000;
-          line-height: 0.95;
-          text-shadow:
-            0 0 24px rgba(255,0,160,0.35),
-            0 0 12px rgba(255,255,255,0.15);
+          font-size: clamp(36px, 7.8vw, 96px);
+          margin: 0; font-weight: 1000; line-height: 0.95;
+          text-shadow: 0 0 24px rgba(255,0,160,0.35), 0 0 12px rgba(255,255,255,0.15);
+          animation: pulseGlow 6s ease-in-out infinite;
         }
+        @keyframes pulseGlow {
+          0%,100% { text-shadow: 0 0 18px rgba(255,0,160,0.28), 0 0 8px rgba(255,255,255,0.12); }
+          50% { text-shadow: 0 0 30px rgba(255,0,160,0.45), 0 0 16px rgba(255,255,255,0.20); }
+        }
+
         .underline {
           width: clamp(140px, 26vw, 320px);
-          height: 5px;
-          border-radius: 999px;
-          background: linear-gradient(90deg, #ff70d9, #6fd3ff);
+          height: 5px; border-radius: 999px;
+          background: linear-gradient(90deg, #ff70d9, #6fd3ff, #ff70d9);
+          background-size: 200% 100%;
+          animation: shimmer 5s linear infinite;
         }
+        @keyframes shimmer { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+
         .name {
           font-size: clamp(24px, 5.4vw, 60px);
-          margin: 0;
-          font-weight: 1000;
-          letter-spacing: 0.3px;
+          margin: 0; font-weight: 1000; letter-spacing: 0.3px;
           text-shadow: 0 0 10px rgba(0,0,0,0.25);
         }
 
@@ -337,9 +359,7 @@ export default function XBannerCard() {
         .pill {
           --padX: clamp(12px, 1.6vw, 20px);
           padding: 10px var(--padX);
-          border-radius: 999px;
-          font-weight: 1000;
-          font-size: clamp(13px, 1.9vw, 20px);
+          border-radius: 999px; font-weight: 1000; font-size: clamp(13px, 1.9vw, 20px);
           color: #fff;
           background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
           border: 1px solid rgba(255,255,255,0.18);
@@ -348,10 +368,8 @@ export default function XBannerCard() {
         }
 
         .tagline {
-          align-self: end;
-          font-size: clamp(16px, 2.8vw, 32px); /* a touch smaller */
-          font-weight: 1000;
-          text-shadow: 0 0 10px rgba(0,0,0,0.25);
+          align-self: end; font-size: clamp(16px, 2.8vw, 32px);
+          font-weight: 1000; text-shadow: 0 0 10px rgba(0,0,0,0.25);
           margin-top: clamp(4px, 1.2vw, 10px);
         }
 
@@ -383,6 +401,15 @@ export default function XBannerCard() {
           box-shadow: 0 6px 18px rgba(0,0,0,0.35);
         }
         .dock button:hover { background: rgba(255,255,255,0.18); }
+
+        /* Sticky, safe dock on mobile */
+        @media (max-width: 768px) {
+          .dock {
+            position: sticky;
+            bottom: max(10px, env(safe-area-inset-bottom));
+            z-index: 10;
+          }
+        }
       `}</style>
     </>
   );
