@@ -1,7 +1,7 @@
 // pages/meet-xenia.js
 import Head from "next/head";
 import Link from "next/link";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import ShareOnX from "../components/ShareOnX";
 
 /** ===== Config ===== */
@@ -24,14 +24,9 @@ const GODDESS_HOLD = Number(process.env.NEXT_PUBLIC_GODDESS_HOLD ?? "5000");
 // (Optional) display only — real routing to treasury is done server-side in /api/pay/create
 const TREASURY_WALLET = process.env.NEXT_PUBLIC_TREASURY_WALLET || "";
 
-/** ===== Content Catalog =====
- * - Free teaser set (minHold: 0)
- * - Multiple hold-tier sets (each set has its own minHold)
- * - Pay-per-image sets with per-image price AND optional per-image freeIfHold override
- * - Bundle product (client button; server handles entitlement fanout)
- */
+/** ===== Content Catalog ===== */
 const VAULT = [
-  /* ===== FREE TEASERS ===== */
+  // ===== FREE TEASERS =====
   {
     id: "free-teasers-01",
     type: "images",
@@ -44,7 +39,7 @@ const VAULT = [
     ],
   },
 
-  /* ===== TEXT / SFW ===== */
+  // ===== TEXT / SFW =====
   {
     id: "opener-pack-01",
     type: "text",
@@ -77,7 +72,7 @@ const VAULT = [
     ],
   },
 
-  /* ===== HOLD-GATED SFW SET ===== */
+  // ===== HOLD-GATED SFW SET =====
   {
     id: "sfw-tease-set",
     type: "images",
@@ -91,7 +86,7 @@ const VAULT = [
     ],
   },
 
-  /* ===== MULTIPLE HOLD-TIER IMAGE SETS ===== */
+  // ===== MULTIPLE HOLD-TIER IMAGE SETS =====
   {
     id: "hold-1000",
     type: "images",
@@ -126,7 +121,7 @@ const VAULT = [
     ],
   },
 
-  /* ===== PAY-PER-IMAGE; FREE FOR BIG HOLDERS OR PER-IMAGE OVERRIDE ===== */
+  // ===== PAY-PER-IMAGE; FREE FOR BIG HOLDERS OR PER-IMAGE OVERRIDE =====
   {
     id: "vip-gallery-01",
     type: "pay-images",
@@ -152,7 +147,7 @@ const VAULT = [
     ],
   },
 
-  /* ===== BUNDLE (buy all VIP 01 at a discount) ===== */
+  // ===== BUNDLE =====
   {
     id: "bundle-vip-01",
     type: "bundle",
@@ -163,7 +158,7 @@ const VAULT = [
     children: ["vip-gallery-01-1", "vip-gallery-01-2", "vip-gallery-01-3"],
   },
 
-  /* ===== CTA ===== */
+  // ===== CTA =====
   {
     id: "custom-goddess",
     type: "cta",
@@ -175,9 +170,36 @@ const VAULT = [
   },
 ];
 
+/** ===== Small UI: Toasts ===== */
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  const idRef = useRef(0);
+  const push = (msg) => {
+    const id = ++idRef.current;
+    setToasts((t) => [...t, { id, msg }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+  };
+  const ui = (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="pointer-events-auto px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold shadow-lg border border-emerald-300/40"
+        >
+          {t.msg}
+        </div>
+      ))}
+    </div>
+  );
+  return { push, ui };
+}
+
 /** ===== RPC helpers ===== */
 async function fetchWithTimeout(url, init = {}, ms = 8000) {
-  return Promise.race([fetch(url, init), new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms))]);
+  return Promise.race([
+    fetch(url, init),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("Timeout")), ms)),
+  ]);
 }
 async function rpc(method, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
@@ -189,14 +211,16 @@ async function rpc(method, params) {
       const j = await r.json();
       if (j.error) throw new Error(j.error?.message || "RPC error");
       return j.result;
-    } catch (e) { lastErr = e; }
+    } catch (e) {
+      lastErr = e;
+    }
   }
   throw lastErr || new Error("All RPCs failed");
 }
 async function getCrushBalance(owner, mint) {
   const res = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
   let total = 0;
-  for (const v of res?.value || []) total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
+  for (const v of (res?.value || [])) total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
   return total;
 }
 
@@ -241,9 +265,7 @@ async function getMe() {
   if (!r.ok) return { authed: false };
   return r.json();
 }
-async function logoutSession() {
-  try { await fetch("/api/auth/logout"); } catch {}
-}
+async function logoutSession() { try { await fetch("/api/auth/logout"); } catch {} }
 function bytesToBase64(bytes) {
   let bin = "";
   const arr = Array.from(bytes);
@@ -266,8 +288,12 @@ export default function MeetXenia() {
   const [unlockedMap, setUnlockedMap] = useState({});
   const [reducedMotion, setReducedMotion] = useState(false);
 
-  // viral: soft-referral support (?ref=code) → stored + forwarded during pay
+  // viral ref
   const [refCode, setRefCode] = useState("");
+
+  // toasts
+  const { push: toast, ui: toastUI } = useToasts();
+  const prevHoldRef = useRef(0);
 
   useEffect(() => {
     setMounted(true);
@@ -355,7 +381,7 @@ export default function MeetXenia() {
       const signatureBase64 = bytesToBase64(new Uint8Array(sig.signature));
 
       const v = await postVerify({ wallet, signatureBase64, nonce: ch.nonce, ts: ch.ts });
-      if (v?.ok) setAuthed(true);
+      if (v?.ok) { setAuthed(true); toast("🔐 Secure login complete"); }
     } catch (e) {
       setErr(e?.message || "Secure login failed");
     }
@@ -365,9 +391,19 @@ export default function MeetXenia() {
     if (!pk) return;
     setChecking(true);
     setErr("");
-    try { setHold(await getCrushBalance(pk, MINT)); }
-    catch { setErr("Balance check failed. Try again."); }
-    finally { setChecking(false); }
+    try {
+      const bal = await getCrushBalance(pk, MINT);
+      setHold(bal);
+      // toast when crossing chat threshold
+      if (prevHoldRef.current < CHAT_MIN_HOLD && bal >= CHAT_MIN_HOLD) {
+        toast("✅ Chat unlocked — go flirt!");
+      }
+      prevHoldRef.current = bal;
+    } catch {
+      setErr("Balance check failed. Try again.");
+    } finally {
+      setChecking(false);
+    }
   }
 
   async function syncAndRefresh() {
@@ -384,10 +420,7 @@ export default function MeetXenia() {
   }
 
   const chatUnlocked = hold >= CHAT_MIN_HOLD;
-
-  const vaultWithNeed = useMemo(
-    () => VAULT.map((it) => ({ ...it, needed: Math.max(0, it.minHold - hold) })), [hold]
-  );
+  const vaultWithNeed = useMemo(() => VAULT.map((it) => ({ ...it, needed: Math.max(0, it.minHold - hold) })), [hold]);
 
   return (
     <>
@@ -396,6 +429,43 @@ export default function MeetXenia() {
         <meta name="description" content="Xenia is your flirty AI girlfriend. Unlock hotter tiers with $CRUSH." />
       </Head>
 
+      {/* Sticky status bar */}
+      <div className="sticky top-0 z-50 backdrop-blur-[6px] bg-[rgba(20,9,25,0.35)] border-b border-pink-300/20">
+        <div className="max-w-6xl mx-auto px-4 py-2 flex flex-wrap gap-2 items-center">
+          <h2 className="text-white/90 font-bold mr-2">Meet Xenia</h2>
+          <div className="text-pink-100/90 text-sm mr-auto">Balance: <b>{hold.toLocaleString()}</b> $CRUSH</div>
+          {!wallet ? (
+            <button onClick={connectWallet} className="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-sm font-semibold hover:bg-pink-500">
+              Connect Phantom
+            </button>
+          ) : (
+            <>
+              {!authed ? (
+                <button onClick={secureLogin} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">Secure Login</button>
+              ) : (
+                <span className="px-3 py-1.5 rounded-xl bg-emerald-600/30 border border-emerald-400/40 text-emerald-100 text-xs">
+                  Session active
+                </span>
+              )}
+              <button onClick={syncAndRefresh} disabled={checking}
+                      className="px-3 py-1.5 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60">
+                {checking ? "Checking…" : "Refresh"}
+              </button>
+              <button
+                onClick={async () => {
+                  await logoutSession();
+                  setWallet(""); setAuthed(false); setHold(0); setUnlockedMap({});
+                  try { localStorage.removeItem("crush_wallet"); } catch {}
+                }}
+                className="px-3 py-1.5 rounded-xl bg-black/30 border border-pink-300/30 text-pink-100 text-sm font-semibold"
+              >
+                Disconnect
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
       <main className="min-h-screen px-4 py-12 flex flex-col items-center">
         {/* HERO */}
         <h1 className="text-4xl font-bold text-white title-glow mb-3">Meet Xenia</h1>
@@ -403,7 +473,7 @@ export default function MeetXenia() {
           Your flirty AI girlfriend. Teasing chat now — and hotter experiences as you hold more <b>$CRUSH</b>.
         </p>
 
-        {/* WALLET / STATUS ROW */}
+        {/* WALLET / STATUS ROW (secondary, under hero) */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
           {!wallet ? (
             <button onClick={connectWallet} className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">
@@ -432,6 +502,7 @@ export default function MeetXenia() {
                   if (!wallet) return;
                   const ids = await fetchEntitlements(wallet);
                   setUnlockedMap((m) => { const n = { ...m }; for (const id of ids) n[id] = true; return n; });
+                  toast("🔁 Purchases restored");
                 }}
                 className="px-3 py-2 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 text-sm font-semibold"
               >
@@ -452,7 +523,7 @@ export default function MeetXenia() {
           )}
           {TREASURY_WALLET && (
             <div className="px-3 py-2 rounded-xl bg-black/30 border border-pink-300/30 text-xs text-pink-200">
-              Treasury receiving paid unlocks: <span className="font-mono">{TREASURY_WALLET.slice(0,4)}…{TREASURY_WALLET.slice(-4)}</span>
+              Treasury: <span className="font-mono">{TREASURY_WALLET.slice(0,4)}…{TREASURY_WALLET.slice(-4)}</span>
             </div>
           )}
           {err && <div className="text-pink-200 text-sm">{err}</div>}
@@ -505,12 +576,12 @@ export default function MeetXenia() {
                 nsfwUnlocked={hold >= NSFW_HOLD}
                 unlockedMap={unlockedMap}
                 onUnlocked={(idOrIds) => {
-                  // support single id or array (bundle)
                   setUnlockedMap((m) => {
                     const next = { ...m };
                     (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).forEach((id) => { next[id] = true; });
                     return next;
                   });
+                  toast("✨ Unlocked!");
                 }}
                 authed={authed}
                 refCode={refCode}
@@ -552,12 +623,16 @@ export default function MeetXenia() {
         </noscript>
       </main>
 
+      {toastUI}
+
       <style jsx global>{`
         .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
         a:focus-visible, button:focus-visible { outline: 3px solid #b5fffc !important; outline-offset: 2px; border-radius: 12px; }
         .preview-pop { animation: pop-in 650ms cubic-bezier(0.22, 1, 0.36, 1); }
         @keyframes pop-in { 0% { transform: scale(0.96); opacity: 0.2; } 100% { transform: scale(1); opacity: 1; } }
         @media (prefers-reduced-motion: reduce) { .preview-pop { animation: none !important; transition: none !important; } }
+        /* locked blur for premium text */
+        .locked-blur { filter: blur(3px); }
       `}</style>
     </>
   );
@@ -659,10 +734,7 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
                       wallet={wallet}
                       itemId={im.id}
                       price={im.priceCrush}
-                      onUnlocked={() => {
-                        onUnlocked?.(im.id);
-                        try { alert("Unlocked! Enjoy ❤️"); } catch {}
-                      }}
+                      onUnlocked={() => onUnlocked?.(im.id)}
                       refCode={refCode}
                     />
                   )}
@@ -683,10 +755,7 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
             wallet={wallet}
             itemId={item.id}
             price={item.priceCrush}
-            onUnlocked={() => {
-              onUnlocked?.(item.children);
-              try { alert("Bundle unlocked! Enjoy ❤️"); } catch {}
-            }}
+            onUnlocked={() => onUnlocked?.(item.children)}
             refCode={refCode}
           />
         </div>
@@ -704,7 +773,8 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
 }
 
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   async function start() {
     if (!wallet) return setErr("Connect wallet first");
     setBusy(true); setErr("");
@@ -718,7 +788,11 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
         if (v?.ok) { onUnlocked?.(); setBusy(false); return; }
       }
       setErr("Payment not detected yet. Try Restore later.");
-    } catch (e) { setErr(e?.message || "Payment failed"); } finally { setBusy(false); }
+    } catch (e) {
+      setErr(e?.message || "Payment failed");
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <div className="share-group flex flex-col gap-1 w-full">
