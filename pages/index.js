@@ -23,6 +23,9 @@ const CUPID_RIGHT_IMG = "/images/cupid_male.png";
 
 /* ---------- CONFIG ---------- */
 const MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500"); // gate = 500 tokens
+const CRUSH_MINT = process.env.NEXT_PUBLIC_CRUSH_MINT || ""; // REQUIRED for RPC fallback
+const SOLANA_RPC =
+  process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 const HAS_SUPABASE =
   !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
   !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -34,25 +37,21 @@ const LS_GUEST = "crush_guest_id";
 const LS_WALLET = "crush_wallet";
 
 /* ---------- ASSET RESOLVER (PNG-only + content-type guard) ---------- */
-// all relative to /public, try /images first (your layout), then safe fallbacks
 const CANDIDATE_DIRS = ["/images", "/", "/img", "/assets", "/brand"];
 async function resolveAssetPath(basename, dirs = CANDIDATE_DIRS) {
   for (const dir of dirs) {
     const p = `${dir}/${basename}.png`.replace(/\/+/g, "/");
     try {
-      // HEAD (cheap) — validate it’s actually an image
       const r = await fetch(p, { method: "HEAD", cache: "no-store" });
       const ct = (r.headers && r.headers.get("content-type")) || "";
       if (r.ok && ct && ct.startsWith("image/")) return p;
     } catch {}
     try {
-      // GET as fallback (if HEAD is blocked by CDN)
       const r2 = await fetch(p, { method: "GET", cache: "force-cache" });
       const ct2 = (r2.headers && r2.headers.get("content-type")) || "";
       if (r2.ok && ct2 && ct2.startsWith("image/")) return p;
     } catch {}
   }
-  // Last resort: your canonical /images path
   return `/images/${basename}.png`;
 }
 
@@ -87,29 +86,22 @@ async function isNameTakenByOther(name, myId) {
     return false;
   }
 }
-
-// Enforce that the locally shown name belongs to the current identity
 async function enforceNameOwnership(currentWallet, setDisplayName) {
   const me = currentIdentifier(currentWallet);
   const stored = (localStorage.getItem(LS_NAME) || "").trim();
   const owner = localStorage.getItem(LS_NAME_OWNER);
-
-  // If the stored name belongs to someone else → clear it
   if (stored && owner && owner !== me) {
     localStorage.removeItem(LS_NAME);
     localStorage.removeItem(LS_NAME_OWNER);
     setDisplayName("");
     return;
   }
-
-  // If Supabase is on, also double-check the DB
   if (stored && (await isNameTakenByOther(stored, me))) {
     localStorage.removeItem(LS_NAME);
     localStorage.removeItem(LS_NAME_OWNER);
     setDisplayName("");
     return;
   }
-
   setDisplayName(stored || "");
 }
 
@@ -127,7 +119,6 @@ function getRandomEmojis() {
   let idx = 0;
   const leftEmojis = [...EMOJIS].sort(() => 0.5 - Math.random());
   const rightEmojis = [...EMOJIS].sort(() => 0.5 - Math.random());
-
   getSidePositions("left", LEFT_COUNT).forEach((pos) => {
     emojis.push({
       id: `l-${idx}`,
@@ -139,7 +130,6 @@ function getRandomEmojis() {
     });
     idx++;
   });
-
   idx = 0;
   getSidePositions("right", RIGHT_COUNT).forEach((pos) => {
     emojis.push({
@@ -152,7 +142,6 @@ function getRandomEmojis() {
     });
     idx++;
   });
-
   return emojis;
 }
 
@@ -168,24 +157,58 @@ const LEVEL_LABELS = [
 ];
 const XP_LEVELS = [0, 100, 400, 900, 1600, 2500, 3600];
 
-/* ---------- Tier fetcher (no signatures) ---------- */
+/* ---------- Low-level RPC fallback: read SPL balance ---------- */
+async function fetchTierViaRPC(owner) {
+  if (!CRUSH_MINT) {
+    console.warn("[CrushAI] NEXT_PUBLIC_CRUSH_MINT missing — RPC fallback disabled.");
+    return { amount: 0, tierName: "FREE" };
+  }
+  try {
+    const body = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTokenAccountsByOwner",
+      params: [
+        owner,
+        { mint: CRUSH_MINT },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ],
+    };
+    const r = await fetch(SOLANA_RPC, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("RPC HTTP error");
+    const j = await r.json();
+    const list = j?.result?.value || [];
+    let total = 0;
+    for (const it of list) {
+      const ui = it?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+      total += Number(ui) || 0;
+    }
+    const amount = Number(total) || 0;
+    const tierName = amount >= MIN_HOLD ? "HOLDER" : "FREE";
+    return { amount, tierName };
+  } catch (e) {
+    console.warn("[CrushAI] RPC fallback failed:", e);
+    return { amount: 0, tierName: "FREE" };
+  }
+}
+
+/* ---------- Tier fetcher (API + RPC fallback) ---------- */
 async function fetchTier(address) {
   const cacheKey = `crush_tier_${address}`;
 
-  // Prefer cached only if it’s positive (avoids “stuck at 0” on mobile)
+  // Use cache only if positive balance (prevents “stuck at 0” on mobile)
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-    if (
-      cached &&
-      cached.expiresAt &&
-      Date.now() < cached.expiresAt &&
-      Number(cached.amount) > 0
-    ) {
-      return cached; // { amount, tierName }
+    if (cached && cached.expiresAt && Date.now() < cached.expiresAt && Number(cached.amount) > 0) {
+      return cached;
     }
   } catch {}
 
-  // 1) Preferred: /api/tier?address=...
+  // 1) Preferred: /api/tier
   try {
     const r = await fetch(`/api/tier?address=${encodeURIComponent(address)}`, {
       headers: { "content-type": "application/json" },
@@ -196,14 +219,20 @@ async function fetchTier(address) {
       const amount = Number(j?.uiAmount || 0);
       const tierName = j?.tier?.name || (amount >= MIN_HOLD ? "HOLDER" : "FREE");
       const payload = { amount, tierName, expiresAt: Date.now() + 60_000 };
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(payload));
-      } catch {}
+      try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+      if (amount === 0) {
+        const rpc = await fetchTierViaRPC(address);
+        if (rpc.amount > 0) {
+          const fixed = { ...rpc, expiresAt: Date.now() + 60_000 };
+          try { localStorage.setItem(cacheKey, JSON.stringify(fixed)); } catch {}
+          return fixed;
+        }
+      }
       return payload;
     }
   } catch {}
 
-  // 2) Fallback: your existing verify endpoint
+  // 2) Fallback: /api/holdings/verify
   try {
     const r = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(address)}`, {
       headers: { "content-type": "application/json" },
@@ -213,13 +242,24 @@ async function fetchTier(address) {
     const amount = Number(j?.amount || 0);
     const tierName = amount >= MIN_HOLD ? "HOLDER" : "FREE";
     const payload = { amount, tierName, expiresAt: Date.now() + 60_000 };
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(payload));
-    } catch {}
+    try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+
+    if (amount === 0) {
+      const rpc = await fetchTierViaRPC(address);
+      if (rpc.amount > 0) {
+        const fixed = { ...rpc, expiresAt: Date.now() + 60_000 };
+        try { localStorage.setItem(cacheKey, JSON.stringify(fixed)); } catch {}
+        return fixed;
+      }
+    }
     return payload;
-  } catch {
-    return { amount: 0, tierName: "FREE" };
-  }
+  } catch {}
+
+  // 3) Last resort: RPC
+  const rpc = await fetchTierViaRPC(address);
+  const payload = { ...rpc, expiresAt: Date.now() + 60_000 };
+  try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+  return payload;
 }
 
 /* ---------- Floating CTA (opens overlay if holder) ---------- */
@@ -251,6 +291,25 @@ function FloatingCTA({ wallet, isHolder, connectWallet, openChat }) {
     >
       {label}
     </button>
+  );
+}
+
+/* ---------- HERO TEASER (always visible for non-holder / not connected) ---------- */
+function GateTeaser({ wallet, isHolder, connectWallet }) {
+  const label = !wallet ? "Connect Phantom" : !isHolder ? "Get $CRUSH" : "Chat now";
+  function go() {
+    if (!wallet) return connectWallet?.();
+    if (!isHolder) return (window.location.href = "/buy");
+    document.getElementById("gate-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  return (
+    <div className="gate-teaser">
+      <span className="gate-teaser-lock">🔒</span>
+      <span className="gate-teaser-text">
+        Unlock Xenia: hold <b>{MIN_HOLD}</b> $CRUSH &amp; connect Phantom
+      </span>
+      <button className="gate-teaser-btn" onClick={go}>{label}</button>
+    </div>
   );
 }
 
@@ -289,12 +348,6 @@ export default function Home() {
       setCupidRightSrc(r);
       setUnlock1Src(u1);
       setUnlock2Src(u2);
-      if (l !== CUPID_LEFT_IMG || r !== CUPID_RIGHT_IMG) {
-        console.info("[CrushAI] Cupid images resolved to:", { left: l, right: r });
-      }
-      if (u1 !== "/images/nsfw1_blurred.png" || u2 !== "/images/nsfw2_blurred.png") {
-        console.info("[CrushAI] Unlock previews resolved to:", { u1, u2 });
-      }
     })();
   }, [mounted]);
 
@@ -314,7 +367,6 @@ export default function Home() {
       } catch {}
       await refreshBalance(pubkey);                 // immediate check
       setTimeout(() => refreshBalance(pubkey), 1500); // second pass for mobile cache
-      // Enforce name ownership when wallet connects/changes
       enforceNameOwnership(pubkey, setDisplayName);
     } catch (e) {
       setGateError(e?.message || "Failed to connect wallet");
@@ -331,7 +383,6 @@ export default function Home() {
     try {
       localStorage.removeItem(LS_WALLET);
     } catch {}
-    // Enforce ownership on disconnect (will fall back to guest id)
     enforceNameOwnership(null, setDisplayName);
   }
 
@@ -706,7 +757,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mb-6 neon-tagline text-lg text-center max-w-xl flex items-center justify-center gap-2">
+        <div className="mb-3 neon-tagline text-lg text-center max-w-xl flex items-center justify-center gap-2">
           <span
             className="lips-emoji-animate"
             style={{ fontSize: "2.5rem", marginRight: "0.32em", display: "inline-block", verticalAlign: "middle" }}
@@ -726,6 +777,11 @@ export default function Home() {
             😘
           </span>
         </div>
+
+        {/* HERO GATE TEASER */}
+        {(!wallet || !isHolder) && (
+          <GateTeaser wallet={wallet} isHolder={isHolder} connectWallet={connectWallet} />
+        )}
 
         {/* XP BAR & LEVEL */}
         <div className="flirt-xp-bar-outer">
@@ -839,7 +895,7 @@ export default function Home() {
 
         {/* ---------- TOKEN GATE PANEL ---------- */}
         {!isHolder && (
-          <div className="chatbox-panel-wrapper">
+          <div className="chatbox-panel-wrapper" id="gate-panel">
             <div className="chatbox-panel chatbox-glass" style={{ padding: "1.2rem" }}>
               <div className="shimmer"></div>
               <div className="text-white text-center">
@@ -1019,12 +1075,27 @@ export default function Home() {
         @keyframes arrow-fly-right { 0% { left: 11vw; opacity: 0; } 10% { left: 13vw; opacity: 1; } 87% { left: 74vw; opacity: 1; } 100% { left: 80vw; opacity: 0; } }
         .cupid-arrow { position: absolute; z-index: 24; }
         .crush-title-animate { animation: crush-title-bounce 1.32s cubic-bezier(0.58, -0.16, 0.6, 1.54) infinite; }
-        @keyframes crush-title-bounce { 0%,100% { transform: scale(1); } 17% { transform: scale(1.08) rotate(-2deg); } 38% { transform: scale(0.97) rotate(3deg); } }
         .title-glow { text-shadow: 0 0 12px #fa1a81bb, 0 0 32px #fff; }
         .neon-tagline { color: #ffd1ec; text-shadow: 0 0 8px #fa1a81bb; }
         .crush-title-heart { font-size: 2.2em; display: inline-block; animation: heart-pulse 1.7s infinite cubic-bezier(0.62, -0.29, 0.7, 1.41); }
         @keyframes heart-pulse { 0%,100% { transform: scale(1); } 28% { transform: scale(1.26); } 70% { transform: scale(1.09); } }
         .chatbox-panel-wrapper { margin: 1.7rem 0 0.8rem 0; width: 99vw; max-width: 440px; }
+
+        /* HERO TEASER */
+        .gate-teaser{
+          display:flex;align-items:center;gap:.8rem;
+          background:linear-gradient(135deg,#ff6aa9cc,#e098f8cc);
+          border:1px solid #ffd1ecaa;border-radius:16px;
+          padding:.6rem .9rem;margin:.4rem 0 1rem;
+          color:#fff; box-shadow:0 10px 24px #fa1a8140;
+          max-width: 640px; width: 92vw;
+        }
+        .gate-teaser-lock{font-size:1.2rem}
+        .gate-teaser-text{font-weight:600}
+        .gate-teaser-btn{
+          margin-left:auto;padding:.5rem .8rem;border-radius:12px;
+          background:#fa1a81;border:none;color:#fff;font-weight:800;cursor:pointer;
+        }
 
         /* keyboard focus */
         a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
