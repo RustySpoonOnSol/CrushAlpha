@@ -43,13 +43,13 @@ async function resolveAssetPath(basename, dirs = CANDIDATE_DIRS) {
       // HEAD (cheap) — validate it’s actually an image
       const r = await fetch(p, { method: "HEAD", cache: "no-store" });
       const ct = (r.headers && r.headers.get("content-type")) || "";
-      if (r.ok && ct.startsWith("image/")) return p;
+      if (r.ok && ct && ct.startsWith("image/")) return p;
     } catch {}
     try {
       // GET as fallback (if HEAD is blocked by CDN)
       const r2 = await fetch(p, { method: "GET", cache: "force-cache" });
       const ct2 = (r2.headers && r2.headers.get("content-type")) || "";
-      if (r2.ok && ct2.startsWith("image/")) return p;
+      if (r2.ok && ct2 && ct2.startsWith("image/")) return p;
     } catch {}
   }
   // Last resort: your canonical /images path
@@ -170,11 +170,17 @@ const XP_LEVELS = [0, 100, 400, 900, 1600, 2500, 3600];
 
 /* ---------- Tier fetcher (no signatures) ---------- */
 async function fetchTier(address) {
-  // try cached 60s
   const cacheKey = `crush_tier_${address}`;
+
+  // Prefer cached only if it’s positive (avoids “stuck at 0” on mobile)
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-    if (cached && cached.expiresAt && Date.now() < cached.expiresAt) {
+    if (
+      cached &&
+      cached.expiresAt &&
+      Date.now() < cached.expiresAt &&
+      Number(cached.amount) > 0
+    ) {
       return cached; // { amount, tierName }
     }
   } catch {}
@@ -183,6 +189,7 @@ async function fetchTier(address) {
   try {
     const r = await fetch(`/api/tier?address=${encodeURIComponent(address)}`, {
       headers: { "content-type": "application/json" },
+      cache: "no-store",
     });
     if (r.ok) {
       const j = await r.json();
@@ -200,6 +207,7 @@ async function fetchTier(address) {
   try {
     const r = await fetch(`/api/holdings/verify?owner=${encodeURIComponent(address)}`, {
       headers: { "content-type": "application/json" },
+      cache: "no-store",
     });
     const j = await r.json().catch(() => ({}));
     const amount = Number(j?.amount || 0);
@@ -304,7 +312,8 @@ export default function Home() {
       try {
         localStorage.setItem(LS_WALLET, pubkey);
       } catch {}
-      await refreshBalance(pubkey);
+      await refreshBalance(pubkey);                 // immediate check
+      setTimeout(() => refreshBalance(pubkey), 1500); // second pass for mobile cache
       // Enforce name ownership when wallet connects/changes
       enforceNameOwnership(pubkey, setDisplayName);
     } catch (e) {
@@ -332,8 +341,8 @@ export default function Home() {
     setGateError("");
     try {
       const { amount, tierName } = await fetchTier(pubkey);
-      setHoldBalance(amount);
-      setTierName(tierName);
+      setHoldBalance(Number(amount) || 0);
+      setTierName(tierName || "");
     } catch (e) {
       setGateError("Balance check failed. Try again.");
     } finally {
@@ -348,6 +357,8 @@ export default function Home() {
     if (stored) {
       setWallet(stored);
       refreshBalance(stored);
+      // Mobile: double-check after a moment to defeat stale 0 cache
+      setTimeout(() => refreshBalance(stored), 1500);
       enforceNameOwnership(stored, setDisplayName);
     } else if (window?.solana?.isPhantom) {
       window.solana
@@ -360,6 +371,7 @@ export default function Home() {
               localStorage.setItem(LS_WALLET, pk);
             } catch {}
             refreshBalance(pk);
+            setTimeout(() => refreshBalance(pk), 1500); // mobile recheck
             enforceNameOwnership(pk, setDisplayName);
           } else {
             // no wallet → enforce as guest
@@ -374,7 +386,8 @@ export default function Home() {
     }
   }, [mounted]);
 
-  const isHolder = wallet && holdBalance >= MIN_HOLD;
+  // Cast to Number to avoid any stringy weirdness on mobile browsers
+  const isHolder = !!wallet && Number(holdBalance) >= MIN_HOLD;
 
   /* ---------- XP state ---------- */
   const [xp, setXp] = useState(0);
@@ -503,7 +516,7 @@ export default function Home() {
   // Arrow fly animation loop (respect visibility + reduced motion)
   useEffect(() => {
     if (!mounted) return;
-    if (document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof document !== "undefined" && (document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
     let arrowTimeout = null;
     const interval = setInterval(() => {
       setArrowKey((k) => k + 1);
@@ -520,7 +533,7 @@ export default function Home() {
   // Emoji burst loop (respect visibility + reduced motion)
   useEffect(() => {
     if (!mounted) return;
-    if (document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof document !== "undefined" && (document.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
     let timeout;
     function burst() {
       setFloatingEmojis([]);
@@ -869,7 +882,7 @@ export default function Home() {
                 </div>
 
                 <div className="text-pink-50">
-                  Your $CRUSH: <b>{holdBalance.toLocaleString()}</b>
+                  Your $CRUSH: <b>{Number(holdBalance).toLocaleString()}</b>
                   {tierName ? (
                     <span className="opacity-90"> &nbsp;•&nbsp; Tier: <b>{tierName}</b></span>
                   ) : null}
@@ -880,6 +893,16 @@ export default function Home() {
                     </span>
                   )}
                 </div>
+
+                {/* Manual safety override in case mobile cache misbehaves */}
+                {wallet && Number(holdBalance) >= MIN_HOLD && (
+                  <button
+                    onClick={() => setChatOpen(true)}
+                    className="px-4 py-2 mt-3 rounded-xl bg-green-500 text-white font-bold"
+                  >
+                    Enter Chat (override)
+                  </button>
+                )}
 
                 {gateError && <div className="mt-3 text-sm text-pink-200/90">{gateError}</div>}
               </div>
