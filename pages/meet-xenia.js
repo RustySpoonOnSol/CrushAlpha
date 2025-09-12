@@ -9,12 +9,14 @@ const MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
   "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
 
+/* RPC rotation with safe fallback */
 const HELIUS_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY || "";
-const RPCS = [
+const RPCS_RAW = [
   process.env.NEXT_PUBLIC_SOLANA_RPC || "",
   HELIUS_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "",
   "https://api.mainnet-beta.solana.com",
 ].filter(Boolean);
+const RPCS = RPCS_RAW.length ? RPCS_RAW : ["https://api.mainnet-beta.solana.com"];
 
 // Global thresholds (align with site + env)
 const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
@@ -427,6 +429,14 @@ export default function MeetXenia() {
       <Head>
         <title>Meet Xenia | Crush AI</title>
         <meta name="description" content="Xenia is your flirty AI girlfriend. Unlock hotter tiers with $CRUSH." />
+
+        {/* speed: networking warmups */}
+        <link rel="preconnect" href="https://api.mainnet-beta.solana.com" crossOrigin="" />
+        {process.env.NEXT_PUBLIC_HELIUS_KEY && (
+          <link rel="preconnect" href="https://mainnet.helius-rpc.com" crossOrigin="" />
+        )}
+        <link rel="dns-prefetch" href="https://api.mainnet-beta.solana.com" />
+        <link rel="dns-prefetch" href="https://mainnet.helius-rpc.com" />
       </Head>
 
       {/* Sticky status bar */}
@@ -785,7 +795,13 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
       while (Date.now() - t0 < 120000) {
         await new Promise((r) => setTimeout(r, 4000));
         const v = await verifyPayment({ wallet, itemId, reference });
-        if (v?.ok) { onUnlocked?.(); setBusy(false); return; }
+        if (v?.ok) {
+          onUnlocked?.();
+          // Optional entitlement pull (extra safety; parent state already updates)
+          try { await fetch(`/api/entitlements?wallet=${encodeURIComponent(wallet)}`).then((r)=>r.json()); } catch {}
+          setBusy(false);
+          return;
+        }
       }
       setErr("Payment not detected yet. Try Restore later.");
     } catch (e) {
