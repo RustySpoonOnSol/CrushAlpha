@@ -17,6 +17,7 @@
     "@solana/wallet-adapter-wallets": "^0.19.37",
     "@solana/web3.js": "^1.98.4",
     "@supabase/supabase-js": "^2.56.1",
+    "@vercel/kv": "^1.0.1",
     "@vercel/og": "^0.6.8",
     "@walletconnect/universal-provider": "^2.21.8",
     "autoprefixer": "^10.4.14",
