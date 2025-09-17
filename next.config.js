@@ -1,18 +1,12 @@
 // next.config.js
-/** @type {import('next').NextConfig} */
+/** @type {import("next").NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-
-  // IMPORTANT: never overwrite config.resolve/alias — always merge.
   webpack: (config) => {
+    // ✅ merge existing aliases; do NOT replace
     config.resolve = config.resolve || {};
-    config.resolve.alias = {
-      ...(config.resolve.alias || {}),
-      // add your aliases here only if you need them, e.g.:
-      // '@': require('path').resolve(__dirname),
-    };
+    config.resolve.alias = { ...(config.resolve.alias || {}) };
     return config;
   },
 };
-
 module.exports = nextConfig;
