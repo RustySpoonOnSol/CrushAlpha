@@ -33,23 +33,25 @@ export default async function handler(req, res) {
     if (isBundle(itemId)) {
       const b = getBundle(itemId);
       if (!b) return res.status(400).json({ error: "unknown bundle" });
-      title = b.title; priceCrush = Number(b.priceCrush || 0);
+      title = b.title;
+      priceCrush = Number(b.priceCrush || 0);
     } else {
       const item = getItem(itemId);
       if (!item) return res.status(400).json({ error: "unknown item" });
-      title = item.title || itemId; priceCrush = Number(item.priceCrush || 0);
+      title = item.title || itemId;
+      priceCrush = Number(item.priceCrush || 0);
     }
     if (priceCrush <= 0) return res.status(400).json({ error: "invalid price" });
 
-    // Unique reference (public key bytes)
+    // Unique reference public key
     const kp = nacl.sign.keyPair();
     const reference = bs58.encode(kp.publicKey);
 
-    // Memo ties the tx to this item; optional attribution
+    // Memo ties the tx to this item; keep attribution if present
     const memo = `crush:${itemId}${ref ? `:ref=${encodeURIComponent(ref)}` : ""}`;
 
     const params = new URLSearchParams({
-      amount: String(priceCrush),
+      amount: String(Math.trunc(priceCrush)),
       "spl-token": CRUSH_MINT,
       reference,
       label: BRAND_LABEL,
@@ -71,10 +73,12 @@ export default async function handler(req, res) {
       reference,
       receiver: RECEIVER,
       mint: CRUSH_MINT,
-      priceCrush,
+      priceCrush: Math.trunc(priceCrush),
       label: BRAND_LABEL,
     });
-  } catch {
+  } catch (e) {
+    // minimal one-time log if you need to see why a 500 happened in Vercel logs
+    try { console.error("pay/create error:", e); } catch {}
     noStore(res);
     return res.status(500).json({ error: "internal_error" });
   }

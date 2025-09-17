@@ -2,6 +2,12 @@
 export const config = { runtime: "edge" };
 import { kv } from "@vercel/kv";
 
+/**
+ * Server-Sent Events stream for real-time unlock confirmations.
+ * - Subscribes to `pay:{ref}` on Upstash/KV
+ * - Heartbeats every 15s to keep proxies from closing the stream
+ * - Clean unsubscribe on client abort
+ */
 export default async function handler(req) {
   const { searchParams } = new URL(req.url);
   const ref = searchParams.get("ref");
@@ -11,18 +17,28 @@ export default async function handler(req) {
     new ReadableStream({
       async start(controller) {
         const enc = new TextEncoder();
-        const write = (d) => controller.enqueue(enc.encode(`data: ${JSON.stringify(d)}\n\n`));
-        const hb = setInterval(() => controller.enqueue(enc.encode(":hb\n\n")), 15000);
+        const enqueue = (line) => controller.enqueue(enc.encode(line));
+        const send = (data) => enqueue(`data: ${JSON.stringify(data)}\n\n`);
 
-        const sub = kv.subscribe(`pay:${ref}`, (msg) => {
-          try { write(JSON.parse(msg)); } catch {}
+        // keep connection warm
+        const hb = setInterval(() => enqueue(":hb\n\n"), 15000);
+
+        // ✅ await the subscription so we can reliably unsubscribe later
+        const sub = await kv.subscribe(`pay:${ref}`, (msg) => {
+          try {
+            send(JSON.parse(msg));
+          } catch {
+            // accept raw strings too
+            send({ ok: true });
+          }
         });
 
-        req.signal.addEventListener("abort", async () => {
+        const onAbort = async () => {
           clearInterval(hb);
           try { await sub.unsubscribe(); } catch {}
           controller.close();
-        });
+        };
+        req.signal.addEventListener("abort", onAbort);
       },
     }),
     {
