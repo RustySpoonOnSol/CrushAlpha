@@ -785,31 +785,69 @@ function VaultCard({ item, hold, wallet, nsfwUnlocked, unlockedMap, onUnlocked, 
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
   async function start() {
     if (!wallet) return setErr("Connect wallet first");
     setBusy(true); setErr("");
+
     try {
-      const { url, reference } = await createPayment({ wallet, itemId, ref: refCode || undefined });
-      window.open(url, "_blank", "noopener,noreferrer");
-      const t0 = Date.now();
-      while (Date.now() - t0 < 120000) {
-        await new Promise((r) => setTimeout(r, 4000));
-        const v = await verifyPayment({ wallet, itemId, reference });
-        if (v?.ok) {
-          onUnlocked?.();
-          // Optional entitlement pull (extra safety; parent state already updates)
-          try { await fetch(`/api/entitlements?wallet=${encodeURIComponent(wallet)}`).then((r)=>r.json()); } catch {}
-          setBusy(false);
-          return;
-        }
+      // 1) Create: now returns both solana: and universalUrl + reference
+      const createRes = await createPayment({ wallet, itemId, ref: refCode || undefined });
+      if (!createRes || createRes.ok === false) throw new Error(createRes?.error || "Create failed");
+      const { url: solanaUrl, universalUrl, reference } = createRes;
+
+      // 2) Open wallet link (universal works on desktop & mobile; solana: best on mobile)
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
+      if (isMobile) open(solanaUrl || universalUrl); else open(universalUrl || solanaUrl);
+
+      // 3) Subscribe for real-time confirmation
+      let done = false;
+      let es;
+      try {
+        es = new EventSource(`/api/pay/subscribe?ref=${encodeURIComponent(reference)}`);
+        es.onmessage = (ev) => {
+          try {
+            const j = JSON.parse(ev.data || "{}");
+            if (j.ok && !done) {
+              done = true;
+              es.close?.();
+              onUnlocked?.();
+            }
+          } catch {}
+        };
+        es.onerror = () => { /* ignore transient disconnects */ };
+      } catch {
+        // if SSE fails (older browsers), fallback will handle it
       }
-      setErr("Payment not detected yet. Try Restore later.");
+
+      // 4) Fallback: short verify loop (in case webhook/SSE is delayed)
+      setTimeout(async () => {
+        if (done) return;
+        for (let i = 0; i < 10 && !done; i++) {
+          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+          if (v?.ok) {
+            done = true;
+            es?.close?.();
+            onUnlocked?.();
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+        if (!done) setErr("Payment pending. Try Restore later.");
+        setBusy(false);
+      }, 6000);
+
+      // If SSE fires quickly, ensure we clear busy
+      const stopIfDone = setInterval(() => {
+        if (done) { clearInterval(stopIfDone); setBusy(false); }
+      }, 500);
     } catch (e) {
       setErr(e?.message || "Payment failed");
-    } finally {
       setBusy(false);
     }
   }
+
   return (
     <div className="share-group flex flex-col gap-1 w-full">
       <button onClick={start} disabled={busy} className="px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold disabled:opacity-60 w-full">

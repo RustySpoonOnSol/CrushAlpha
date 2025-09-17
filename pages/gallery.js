@@ -235,7 +235,7 @@ export default function GalleryPage() {
         <meta name="robots" content="noimageindex, noai" />
       </Head>
 
-      <div className="sticky top-0 z-40 backdrop-blur-md bg-[rgba(20,9,25,0.35)] border-b border-pink-300/20">
+      <div className="sticky top-0 z-40 backdrop-blur-md bg[rgba(20,9,25,0.35)] bg-[rgba(20,9,25,0.35)] border-b border-pink-300/20">
         <div className="max-w-6xl mx-auto px-4 py-2 flex items-center gap-2">
           <Link href="/meet-xenia" className="text-pink-100 hover:underline">← Back</Link>
           <div className="ml-auto flex items-center gap-2">
@@ -351,37 +351,73 @@ export default function GalleryPage() {
   );
 }
 
-/** ===== Pay button (same flow; keep simple) ===== */
+/** ===== Pay button (upgraded: universal link + SSE + fallback verify) ===== */
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
   async function start() {
     if (!wallet) return setErr("Connect wallet first");
     setBusy(true); setErr("");
-    try {
-      // If your /api/pay/create already returns both solana: and universal URLs, you can prefer universal on desktop
-      const { url, universalUrl, reference } = await createPayment({ wallet, itemId, ref: refCode || undefined });
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const hasExtension = !!window.solana;
-      const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
-      if (isMobile)        open(url || universalUrl);
-      else if (hasExtension && universalUrl) open(universalUrl);
-      else if (universalUrl) open(universalUrl);
-      else if (url)        open(url);
 
-      const t0 = Date.now();
-      while (Date.now() - t0 < 120000) {
-        await new Promise((r) => setTimeout(r, 4000));
-        const v = await verifyPayment({ wallet, itemId, reference });
-        if (v?.ok) { onUnlocked?.(); setBusy(false); return; }
+    try {
+      // 1) Create: now returns both solana: and universalUrl + a unique reference
+      const createRes = await createPayment({ wallet, itemId, ref: refCode || undefined });
+      if (!createRes || createRes.ok === false) throw new Error(createRes?.error || "Create failed");
+      const { url: solanaUrl, universalUrl, reference } = createRes;
+
+      // 2) Open wallet link (universal works on desktop & mobile; solana: best on mobile)
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
+      if (isMobile) open(solanaUrl || universalUrl); else open(universalUrl || solanaUrl);
+
+      // 3) Subscribe for real-time confirmation via SSE
+      let done = false;
+      let es;
+      try {
+        es = new EventSource(`/api/pay/subscribe?ref=${encodeURIComponent(reference)}`);
+        es.onmessage = (ev) => {
+          try {
+            const j = JSON.parse(ev.data || "{}");
+            if (j.ok && !done) {
+              done = true;
+              es.close?.();
+              onUnlocked?.();
+            }
+          } catch {}
+        };
+        es.onerror = () => { /* ignore transient disconnects */ };
+      } catch {
+        // if SSE fails (older browsers), fallback will handle it
       }
-      setErr("Payment pending. Try Restore later.");
+
+      // 4) Fallback: short verify loop (in case webhook/SSE is delayed)
+      setTimeout(async () => {
+        if (done) return;
+        for (let i = 0; i < 10 && !done; i++) {
+          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+          if (v?.ok) {
+            done = true;
+            es?.close?.();
+            onUnlocked?.();
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+        if (!done) setErr("Payment pending. Try Restore later.");
+        setBusy(false);
+      }, 6000);
+
+      // If SSE fires quickly, ensure we clear busy
+      const stopIfDone = setInterval(() => {
+        if (done) { clearInterval(stopIfDone); setBusy(false); }
+      }, 500);
     } catch (e) {
       setErr(e?.message || "Payment failed");
-    } finally {
       setBusy(false);
     }
   }
+
   return (
     <div className="flex flex-col gap-1">
       <button onClick={start} disabled={busy}
