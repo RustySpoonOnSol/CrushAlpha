@@ -1,101 +1,121 @@
 // pages/api/pay/tx.js
 export const config = { runtime: "nodejs" };
 
-import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Connection } from "@solana/web3.js";
+import {
+  PublicKey,
+  Transaction,
+  ComputeBudgetProgram,
+  Connection,
+} from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
 } from "@solana/spl-token";
-import bs58 from "bs58";
-
-// ---- KV client (for your existing reference binding + SSE later if you want) ----
 import { createClient } from "@vercel/kv";
+
+// ---- KV (for reference binding check) ----
 const kv = createClient({
-  url: process.env.CRUSH_KV_URL || process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.CRUSH_KV_TOKEN || process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
+  url:
+    process.env.CRUSH_KV_URL ||
+    process.env.KV_REST_API_URL ||
+    process.env.UPSTASH_REDIS_REST_URL,
+  token:
+    process.env.CRUSH_KV_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// ---- Env / RPCs ----
-const RECEIVER = process.env.PAY_RECEIVER || process.env.NEXT_PUBLIC_TREASURY || "";
-const HELIUS_KEY = process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_KEY || "";
+// ---- Config ----
+const RECEIVER =
+  process.env.PAY_RECEIVER || process.env.NEXT_PUBLIC_TREASURY || "";
+const CRUSH_MINT =
+  process.env.NEXT_PUBLIC_CRUSH_MINT ||
+  "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
+
+// Memo program
+const MEMO_PROGRAM_ID = new PublicKey(
+  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+);
+
+// RPC rotation (simple)
+const HELIUS = process.env.NEXT_PUBLIC_HELIUS_KEY || process.env.HELIUS_API_KEY;
 const RPCS = [
   process.env.SOLANA_RPC_PRIMARY,
-  process.env.SOLANA_RPC_FALLBACK,
   process.env.NEXT_PUBLIC_SOLANA_RPC,
-  HELIUS_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "",
+  HELIUS ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS}` : "",
   "https://api.mainnet-beta.solana.com",
 ].filter(Boolean);
+const pickRpc = () => RPCS[Math.floor(Math.random() * RPCS.length)];
 
-function pickRpc() { return RPCS[Math.floor(Math.random() * RPCS.length)]; }
-
-// Simple RPC helper
+// small helpers
+function noStore(res) {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("CDN-Cache-Control", "no-store");
+  res.setHeader("Vercel-CDN-Cache-Control", "no-store");
+}
 async function rpc(method, params) {
-  for (let i = 0; i < RPCS.length; i++) {
-    const url = RPCS[(i + Math.floor(Math.random() * RPCS.length)) % RPCS.length];
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  for (const url of RPCS) {
     try {
       const r = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        body,
       });
       const j = await r.json();
       if (!j?.error) return j.result;
     } catch {}
   }
-  return null;
-}
-
-const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
-
-function noStore(res) {
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("CDN-Cache-Control", "no-store");
-  res.setHeader("Vercel-CDN-Cache-Control", "no-store");
+  throw new Error("RPC failed");
 }
 
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
-      return res.status(405).json({ ok: false, error: "method_not_allowed" });
+      return res.status(405).json({ ok: false, error: "method not allowed" });
     }
 
-    if (!RECEIVER) return res.status(500).json({ ok: false, error: "env_missing_PAY_RECEIVER" });
-
-    const { wallet, itemId, reference } = req.body || {};
-    if (!wallet || String(wallet).length < 25) return res.status(400).json({ ok: false, error: "wallet_invalid" });
-    if (!itemId) return res.status(400).json({ ok: false, error: "itemId_required" });
-
-    // Get product & mint
-    let payments;
-    try { payments = await import("../../../lib/payments"); }
-    catch { return res.status(500).json({ ok: false, error: "payments_import_error" }); }
-    const { getItem, isBundle, getBundle, CRUSH_MINT } = payments;
-    if (!CRUSH_MINT) return res.status(500).json({ ok: false, error: "env_missing_CRUSH_MINT" });
-
-    // Resolve price in whole tokens (e.g. 250)
-    let title = "", priceCrush = 0;
-    if (isBundle?.(itemId)) {
-      const b = getBundle?.(itemId);
-      if (!b) return res.status(400).json({ ok: false, error: "unknown_bundle" });
-      title = b.title; priceCrush = Number(b.priceCrush || 0);
-    } else {
-      const it = getItem?.(itemId);
-      if (!it) return res.status(400).json({ ok: false, error: "unknown_item" });
-      title = it.title || itemId; priceCrush = Number(it.priceCrush || 0);
+    const { wallet = "", itemId = "", reference = "" } = await req.json?.() ||
+      req.body || {};
+    if (!wallet || wallet.length < 25 || !itemId) {
+      noStore(res);
+      return res.status(400).json({ ok: false, error: "bad_request" });
     }
-    if (!(priceCrush > 0)) return res.status(400).json({ ok: false, error: "invalid_price" });
+    if (!RECEIVER) {
+      noStore(res);
+      return res.status(400).json({ ok: false, error: "PAY_RECEIVER not set" });
+    }
 
-    // Ensure reference persisted (anti-spoof) if you used /create first
+    // price lookup (mirror of /api/pay/create)
+    const PRICE_MAP = {
+      "vip-gallery-01-1": 250,
+      "vip-gallery-01-2": 300,
+      "vip-gallery-01-3": 400,
+      "pp-02-1": 500,
+      "pp-02-2": 750,
+      "pp-02-3": 1000,
+      "bundle-vip-01": 600,
+    };
+    const title = itemId;
+    const priceCrush = PRICE_MAP[itemId];
+    if (!(priceCrush > 0)) {
+      noStore(res);
+      return res.status(400).json({ ok: false, error: "invalid_price" });
+    }
+
+    // sanity: reference should be bound by /create
     if (reference) {
       const bound = await kv.get(`pay:ref:${reference}`);
       if (!bound || bound.itemId !== itemId) {
-        return res.status(400).json({ ok: false, error: "reference_not_bound" });
+        noStore(res);
+        return res
+          .status(400)
+          .json({ ok: false, error: "reference_not_bound" });
       }
     }
 
-    // Build SPL transfer
     const payer = new PublicKey(wallet);
     const receiverOwner = new PublicKey(RECEIVER);
     const mint = new PublicKey(CRUSH_MINT);
@@ -104,40 +124,56 @@ export default async function handler(req, res) {
     const supply = await rpc("getTokenSupply", [CRUSH_MINT]);
     const decimals = Number(supply?.value?.decimals ?? 9);
 
-    // to smallest units
-    const amountSmallest = BigInt(Math.trunc(priceCrush)) * (10n ** BigInt(decimals));
-    const amountU64 = Number(amountSmallest); // 250e9 fits in JS safe integer
+    // to base units (u64)
+    const amountU64 = Number(
+      BigInt(Math.trunc(priceCrush)) * 10n ** BigInt(decimals)
+    );
 
     const conn = new Connection(pickRpc(), "confirmed");
+    const tx = new Transaction();
+    tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
 
-    // derive ATAs
+    // ATAs
     const srcAta = await getAssociatedTokenAddress(mint, payer, false);
     const dstAta = await getAssociatedTokenAddress(mint, receiverOwner, false);
 
-    // create tx
-    const tx = new Transaction();
-    // Optional: a little more CU
-    tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
-
-    // Ensure receiver ATA exists (payer funds creation if missing)
-    const dstInfo = await conn.getAccountInfo(dstAta);
-    if (!dstInfo) {
+    // Ensure payer ATA exists (edge case: never received $CRUSH yet)
+    const srcInfo = await conn.getAccountInfo(srcAta);
+    if (!srcInfo) {
       tx.add(
         createAssociatedTokenAccountInstruction(
-          payer,          // payer
-          dstAta,         // associated token account
-          receiverOwner,  // ATA owner
+          payer, // payer
+          srcAta,
+          payer, // owner = payer
           mint
         )
       );
     }
 
-    // Transfer checked
+    // Ensure receiver ATA exists
+    const dstInfo = await conn.getAccountInfo(dstAta);
+    if (!dstInfo) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          payer, // payer
+          dstAta,
+          receiverOwner,
+          mint
+        )
+      );
+    }
+
+    // TransferChecked
     const ix = createTransferCheckedInstruction(
-      srcAta, mint, dstAta, payer, amountU64, decimals
+      srcAta, // from ATA
+      mint, // mint
+      dstAta, // to ATA
+      payer, // owner of source
+      amountU64,
+      decimals
     );
 
-    // Add Solana Pay "reference" as a readonly key so we can find it on-chain
+    // add Solana Pay "reference" so we can index by it
     if (reference) {
       ix.keys.push({
         pubkey: new PublicKey(reference),
@@ -147,7 +183,7 @@ export default async function handler(req, res) {
     }
     tx.add(ix);
 
-    // Add memo to tie the purchase to the product
+    // Memo (tie to item)
     const memo = `crush:${itemId}`;
     tx.add({
       keys: [],
@@ -160,8 +196,11 @@ export default async function handler(req, res) {
     tx.recentBlockhash = blockhash;
     tx.feePayer = payer;
 
-    // Return base64 (unsigned) for Phantom to sign & send
-    const b64 = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64");
+    // Serialize (unsigned) for Phantom signAndSendTransaction
+    const b64 = Buffer.from(tx.serialize({ requireAllSignatures: false })).toString(
+      "base64"
+    );
+
     noStore(res);
     return res.status(200).json({
       ok: true,
@@ -172,7 +211,9 @@ export default async function handler(req, res) {
       txBase64: b64,
     });
   } catch (e) {
-    try { console.error("pay/tx error:", e); } catch {}
+    try {
+      console.error("pay/tx error:", e);
+    } catch {}
     noStore(res);
     return res.status(500).json({ ok: false, error: "internal_error" });
   }
