@@ -591,7 +591,6 @@ export default function MeetXenia() {
                     (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).forEach((id) => { next[id] = true; });
                     return next;
                   });
-                  toast("✨ Unlocked!");
                 }}
                 authed={authed}
                 refCode={refCode}
@@ -791,17 +790,12 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
     setBusy(true); setErr("");
 
     try {
-      // 1) Create: now returns both solana: and universalUrl + reference
+      // 1) Create: returns { url, universalUrl, reference }
       const createRes = await createPayment({ wallet, itemId, ref: refCode || undefined });
       if (!createRes || createRes.ok === false) throw new Error(createRes?.error || "Create failed");
       const { url: solanaUrl, universalUrl, reference } = createRes;
 
-      // 2) Open wallet link (universal works on desktop & mobile; solana: best on mobile)
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
-      if (isMobile) open(solanaUrl || universalUrl); else open(universalUrl || solanaUrl);
-
-      // 3) Subscribe for real-time confirmation
+      // 2) Subscribe for real-time unlock via SSE
       let done = false;
       let es;
       try {
@@ -816,32 +810,71 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
             }
           } catch {}
         };
-        es.onerror = () => { /* ignore transient disconnects */ };
-      } catch {
-        // if SSE fails (older browsers), fallback will handle it
+        es.onerror = () => {};
+      } catch {}
+
+      // 3) Try programmatic wallet approval first
+      let programmaticWorked = false;
+      if (window?.solana?.signAndSendTransaction) {
+        try {
+          const txResp = await fetch("/api/pay/tx", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ wallet, itemId, reference })
+          }).then(r => r.json());
+          if (!txResp?.ok || !txResp?.txBase64) throw new Error(txResp?.error || "Build tx failed");
+
+          const web3 = window.solanaWeb3 || await import("https://esm.sh/@solana/web3.js@1.93.0");
+          const tx = web3.Transaction.from(Buffer.from(txResp.txBase64, "base64"));
+
+          // ensure Phantom session
+          try { await window.solana.connect({ onlyIfTrusted: true }); } catch {}
+          const { signature } = await window.solana.signAndSendTransaction(tx);
+          console.log("Submitted signature:", signature);
+
+          programmaticWorked = true;
+
+          // Kick verify to publish immediately
+          fetch(`/api/pay/verify?wallet=${encodeURIComponent(wallet)}&itemId=${encodeURIComponent(itemId)}&reference=${encodeURIComponent(reference)}`)
+            .then(r=>r.json()).then(v => console.log("verify:", v));
+        } catch (e) {
+          console.warn("Programmatic pay failed; falling back to link:", e);
+        }
       }
 
-      // 4) Fallback: short verify loop (in case webhook/SSE is delayed)
-      setTimeout(async () => {
-        if (done) return;
-        for (let i = 0; i < 10 && !done; i++) {
-          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
-          if (v?.ok) {
-            done = true;
-            es?.close?.();
-            onUnlocked?.();
-            break;
+      // 4) Fallback: open Phantom link (mobile prefers Universal)
+      if (!programmaticWorked) {
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
+        if (isMobile) open(universalUrl || solanaUrl); else open(universalUrl || solanaUrl);
+
+        // Fallback verify loop if webhook/SSE is delayed
+        setTimeout(async () => {
+          if (done) return;
+          for (let i = 0; i < 10 && !done; i++) {
+            const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+            if (v?.ok) {
+              done = true;
+              es?.close?.();
+              onUnlocked?.();
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 3000));
           }
+          if (!done) setErr("Payment pending. Try Restore later.");
+          setBusy(false);
+        }, 6000);
+      } else {
+        // If programmatic path used, short verify loop just in case SSE is slow
+        const until = Date.now() + 45_000;
+        while (!done && Date.now() < until) {
+          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+          if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
           await new Promise((r) => setTimeout(r, 3000));
         }
-        if (!done) setErr("Payment pending. Try Restore later.");
+        if (!done) setErr("Payment submitted, awaiting finality… Use Restore later if needed.");
         setBusy(false);
-      }, 6000);
-
-      // If SSE fires quickly, ensure we clear busy
-      const stopIfDone = setInterval(() => {
-        if (done) { clearInterval(stopIfDone); setBusy(false); }
-      }, 500);
+      }
     } catch (e) {
       setErr(e?.message || "Payment failed");
       setBusy(false);

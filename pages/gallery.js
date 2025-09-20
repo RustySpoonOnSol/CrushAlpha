@@ -50,7 +50,7 @@ async function getCrushBalance(owner, mint) {
   return total;
 }
 
-/** ===== Auth + Entitlements (same endpoints you already have) ===== */
+/** ===== Auth + Entitlements ===== */
 async function getChallenge(wallet) {
   const r = await fetch(`/api/auth/challenge?wallet=${encodeURIComponent(wallet)}`);
   if (!r.ok) throw new Error("Challenge failed");
@@ -76,9 +76,7 @@ async function fetchEntitlements(wallet) {
   const j = await r.json();
   return (j?.items || []).map((x) => x.itemId);
 }
-async function logoutSession() {
-  try { await fetch("/api/auth/logout"); } catch {}
-}
+async function logoutSession() { try { await fetch("/api/auth/logout"); } catch {} }
 function bytesToBase64(bytes) {
   let bin = "";
   const arr = Array.from(bytes);
@@ -86,7 +84,7 @@ function bytesToBase64(bytes) {
   return btoa(bin);
 }
 
-/** ===== Pay flow ===== */
+/** ===== Pay/Verify API helpers ===== */
 async function createPayment({ wallet, itemId, ref }) {
   const r = await fetch("/api/pay/create", {
     method: "POST",
@@ -96,6 +94,15 @@ async function createPayment({ wallet, itemId, ref }) {
   if (!r.ok) throw new Error("Create payment failed");
   return r.json();
 }
+async function buildTx({ wallet, itemId, reference }) {
+  const r = await fetch("/api/pay/tx", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ wallet, itemId, reference }),
+  });
+  if (!r.ok) throw new Error("Build tx failed");
+  return r.json(); // { ok, txBase64, ... }
+}
 async function verifyPayment({ wallet, itemId, reference }) {
   const qs = new URLSearchParams({ wallet, itemId, reference });
   const r = await fetch(`/api/pay/verify?${qs.toString()}`);
@@ -103,7 +110,7 @@ async function verifyPayment({ wallet, itemId, reference }) {
   return r.json();
 }
 
-/** ===== Gallery items (previews only; full-res stays behind API) ===== */
+/** ===== Gallery items (previews only) ===== */
 const GALLERIES = [
   {
     id: "vip-gallery-01",
@@ -225,7 +232,6 @@ export default function GalleryPage() {
     }
   }
 
-  // derived
   const nsfwUnlocked = hold >= NSFW_HOLD;
 
   return (
@@ -330,12 +336,10 @@ export default function GalleryPage() {
       </main>
 
       <style jsx global>{`
-        /* stronger lock styling than the vault to avoid "super visible" previews */
         .locked-preview {
           filter: blur(18px) saturate(0.7) brightness(0.7) contrast(0.9);
           transform: scale(1.02);
         }
-        /* diagonal watermark overlay */
         .watermark {
           display: block;
           background-image: repeating-linear-gradient(
@@ -351,7 +355,7 @@ export default function GalleryPage() {
   );
 }
 
-/** ===== Pay button (upgraded: universal link + SSE + fallback verify) ===== */
+/** ===== Pay button (upgraded: programmatic Phantom ➜ fallback link ➜ SSE + verify) ===== */
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -361,17 +365,12 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
     setBusy(true); setErr("");
 
     try {
-      // 1) Create: now returns both solana: and universalUrl + a unique reference
-      const createRes = await createPayment({ wallet, itemId, ref: refCode || undefined });
-      if (!createRes || createRes.ok === false) throw new Error(createRes?.error || "Create failed");
-      const { url: solanaUrl, universalUrl, reference } = createRes;
+      // 1) Create → returns reference binding + (universal/solana) links
+      const created = await createPayment({ wallet, itemId, ref: refCode || undefined });
+      if (!created?.ok) throw new Error(created?.error || "Create failed");
+      const { url: solanaUrl, universalUrl, reference } = created;
 
-      // 2) Open wallet link (universal works on desktop & mobile; solana: best on mobile)
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
-      if (isMobile) open(solanaUrl || universalUrl); else open(universalUrl || solanaUrl);
-
-      // 3) Subscribe for real-time confirmation via SSE
+      // 2) Subscribe for real-time unlock via SSE
       let done = false;
       let es;
       try {
@@ -386,32 +385,63 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
             }
           } catch {}
         };
-        es.onerror = () => { /* ignore transient disconnects */ };
-      } catch {
-        // if SSE fails (older browsers), fallback will handle it
+        es.onerror = () => {};
+      } catch {}
+
+      // 3) Prefer **programmatic** wallet approval (desktop + Phantom dapp browser)
+      let programmaticWorked = false;
+      if (window?.solana?.signAndSendTransaction) {
+        try {
+          const txResp = await buildTx({ wallet, itemId, reference });
+          if (!txResp?.ok || !txResp?.txBase64) throw new Error(txResp?.error || "Build tx failed");
+
+          const web3 = window.solanaWeb3 || await import("https://esm.sh/@solana/web3.js@1.93.0");
+          const tx = web3.Transaction.from(Buffer.from(txResp.txBase64, "base64"));
+
+          // ensure session
+          try { await window.solana.connect({ onlyIfTrusted: true }); } catch {}
+
+          const { signature } = await window.solana.signAndSendTransaction(tx);
+          console.log("Submitted:", signature);
+
+          programmaticWorked = true;
+
+          // Nudge verify to publish immediately
+          fetch(`/api/pay/verify?wallet=${encodeURIComponent(wallet)}&itemId=${encodeURIComponent(itemId)}&reference=${encodeURIComponent(reference)}`)
+            .then(r=>r.json()).then(v => console.log("verify:", v));
+        } catch (e) {
+          console.warn("Programmatic pay failed; falling back to link:", e);
+        }
       }
 
-      // 4) Fallback: short verify loop (in case webhook/SSE is delayed)
-      setTimeout(async () => {
-        if (done) return;
-        for (let i = 0; i < 10 && !done; i++) {
-          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
-          if (v?.ok) {
-            done = true;
-            es?.close?.();
-            onUnlocked?.();
-            break;
+      // 4) Fallback: open Phantom universal/solana link (mobile prefers Universal)
+      if (!programmaticWorked) {
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
+        if (isMobile) open(universalUrl || solanaUrl); else open(universalUrl || solanaUrl);
+
+        // Short verify loop if webhook/SSE is delayed
+        setTimeout(async () => {
+          if (done) return;
+          for (let i = 0; i < 10 && !done; i++) {
+            const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+            if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
+            await new Promise((r) => setTimeout(r, 3000));
           }
+          if (!done) setErr("Payment pending. Try Restore later.");
+          setBusy(false);
+        }, 6000);
+      } else {
+        // If programmatic path used, quick verify loop just in case
+        const until = Date.now() + 45_000;
+        while (!done && Date.now() < until) {
+          const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
+          if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
           await new Promise((r) => setTimeout(r, 3000));
         }
-        if (!done) setErr("Payment pending. Try Restore later.");
+        if (!done) setErr("Payment submitted, awaiting finality… Use Restore later if needed.");
         setBusy(false);
-      }, 6000);
-
-      // If SSE fires quickly, ensure we clear busy
-      const stopIfDone = setInterval(() => {
-        if (done) { clearInterval(stopIfDone); setBusy(false); }
-      }, 500);
+      }
     } catch (e) {
       setErr(e?.message || "Payment failed");
       setBusy(false);

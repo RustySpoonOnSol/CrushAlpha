@@ -1,6 +1,12 @@
 // pages/api/pay/verify.js
 export const config = { runtime: "nodejs" };
 
+import { createClient } from "@vercel/kv";
+const kv = createClient({
+  url:   process.env.CRUSH_KV_URL || process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.CRUSH_KV_TOKEN || process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
+});
+
 const HELIUS_KEY = process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_KEY || "";
 const RPCS = [
   process.env.SOLANA_RPC_PRIMARY,
@@ -25,10 +31,7 @@ async function rpc(method, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
   for (const url of RPCS) {
     try {
-      const r = await withTimeout(
-        fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body }),
-        TIMEOUT_MS
-      );
+      const r = await withTimeout(fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body }), TIMEOUT_MS);
       const j = await r.json();
       if (!j?.error) return j.result;
     } catch {}
@@ -56,7 +59,7 @@ function findCrushDeltaToTreasury(tx, mint, receiver) {
     const preAmt = BigInt(preMatch?.uiTokenAmount?.amount || "0");
     delta += postAmt - preAmt;
   }
-  return delta;
+  return delta; // smallest units
 }
 
 export default async function handler(req, res) {
@@ -120,12 +123,18 @@ export default async function handler(req, res) {
       const delta = findCrushDeltaToTreasury(tx, CRUSH_MINT, RECEIVER);
       if (delta < expectedSmallest) continue;
 
+      // ✅ grant entitlements
       if (isBundle?.(itemId)) {
         const { ids } = getBundleChildren(itemId);
         await grantEntitlements(wallet, ids, sig);
       } else {
         await grantEntitlement(wallet, itemId, sig);
       }
+
+      // ✅ publish unlock event to SSE listeners
+      try {
+        await kv.publish(`pay:${reference}`, JSON.stringify({ ok: true, wallet, itemId, signature: sig }));
+      } catch {}
 
       noStore(res);
       return res.status(200).json({ ok: true, signature: sig });
