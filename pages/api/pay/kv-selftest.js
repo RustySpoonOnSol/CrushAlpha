@@ -1,9 +1,16 @@
+// pages/api/pay/kv-selftest.js
 export const config = { runtime: "nodejs" };
 import { createClient } from "@vercel/kv";
 
 const kv = createClient({
-  url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
+  url:
+    process.env.CRUSH_KV_URL ||
+    process.env.KV_REST_API_URL ||
+    process.env.UPSTASH_REDIS_REST_URL,
+  token:
+    process.env.CRUSH_KV_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
 export default async function handler(req, res) {
