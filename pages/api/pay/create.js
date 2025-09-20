@@ -1,7 +1,7 @@
 // pages/api/pay/create.js
 export const config = { runtime: "nodejs" };
 
-import nacl from "tweetnacl";
+import { randomBytes } from "node:crypto";
 import bs58 from "bs58";
 import { kv } from "@vercel/kv";
 import { getItem, isBundle, getBundle, CRUSH_MINT } from "../../../lib/payments";
@@ -43,9 +43,8 @@ export default async function handler(req, res) {
     }
     if (priceCrush <= 0) return res.status(400).json({ error: "invalid price" });
 
-    // Unique reference public key
-    const kp = nacl.sign.keyPair();
-    const reference = bs58.encode(kp.publicKey);
+    // ✅ Robust reference: 32 random bytes → base58 (valid Solana pubkey format)
+    const reference = bs58.encode(randomBytes(32));
 
     // Memo ties the tx to this item; keep attribution if present
     const memo = `crush:${itemId}${ref ? `:ref=${encodeURIComponent(ref)}` : ""}`;
@@ -77,7 +76,6 @@ export default async function handler(req, res) {
       label: BRAND_LABEL,
     });
   } catch (e) {
-    // minimal one-time log if you need to see why a 500 happened in Vercel logs
     try { console.error("pay/create error:", e); } catch {}
     noStore(res);
     return res.status(500).json({ error: "internal_error" });
