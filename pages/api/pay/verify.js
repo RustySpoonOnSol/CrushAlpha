@@ -1,9 +1,6 @@
 // pages/api/pay/verify.js
 export const config = { runtime: "nodejs" };
 
-import { getItem, isBundle, getBundleChildren, CRUSH_MINT } from "../../../lib/payments";
-import { grantEntitlement, grantEntitlements } from "../../../lib/entitlements";
-
 const HELIUS_KEY = process.env.HELIUS_API_KEY || process.env.NEXT_PUBLIC_HELIUS_KEY || "";
 const RPCS = [
   process.env.SOLANA_RPC_PRIMARY,
@@ -68,29 +65,38 @@ export default async function handler(req, res) {
   try {
     if (req.method !== "GET") {
       res.setHeader("Allow", "GET");
-      return res.status(405).json({ ok: false, error: "method not allowed" });
+      return res.status(405).json({ ok: false, error: "method_not_allowed" });
     }
 
     const wallet = String(req.query.wallet || "");
     const itemId = String(req.query.itemId || "");
     const reference = String(req.query.reference || "");
-    if (!wallet || wallet.length < 25) { noStore(res); return res.status(400).json({ ok: false, error: "wallet invalid" }); }
-    if (!itemId || !reference) { noStore(res); return res.status(400).json({ ok: false, error: "itemId and reference required" }); }
-    if (!RECEIVER) { noStore(res); return res.status(400).json({ ok: false, error: "PAY_RECEIVER not set" }); }
+    if (!wallet || wallet.length < 25) { noStore(res); return res.status(400).json({ ok: false, error: "wallet_invalid" }); }
+    if (!itemId || !reference) { noStore(res); return res.status(400).json({ ok: false, error: "itemId_and_reference_required" }); }
+    if (!RECEIVER) { noStore(res); return res.status(500).json({ ok: false, error: "env_missing_PAY_RECEIVER" }); }
 
-    // Resolve expected price in $CRUSH
-    let expectedUi = 0; // integer tokens
-    if (isBundle(itemId)) {
-      const b = getBundleChildren(itemId);
-      if (!b) { noStore(res); return res.status(400).json({ ok: false, error: "unknown bundle" }); }
+    // Dynamic imports to avoid build-time fatal errors
+    let payments, ents;
+    try { payments = await import("../../../lib/payments"); }
+    catch (e) { try { console.error("verify payments_import_error:", e); } catch {}; return res.status(500).json({ ok: false, error: "payments_import_error" }); }
+    try { ents = await import("../../../lib/entitlements"); }
+    catch (e) { try { console.error("verify entitlements_import_error:", e); } catch {}; return res.status(500).json({ ok: false, error: "entitlements_import_error" }); }
+
+    const { getItem, isBundle, getBundleChildren, CRUSH_MINT } = payments;
+    const { grantEntitlement, grantEntitlements } = ents;
+
+    // Resolve expected price (integer tokens)
+    let expectedUi = 0;
+    if (isBundle?.(itemId)) {
+      const b = getBundleChildren?.(itemId);
+      if (!b) { noStore(res); return res.status(400).json({ ok: false, error: "unknown_bundle" }); }
       expectedUi = Number(b.bundlePriceCrush || 0);
     } else {
-      const item = getItem(itemId);
-      if (!item) { noStore(res); return res.status(400).json({ ok: false, error: "unknown item" }); }
+      const item = getItem?.(itemId);
+      if (!item) { noStore(res); return res.status(400).json({ ok: false, error: "unknown_item" }); }
       expectedUi = Number(item.priceCrush || 0);
     }
 
-    // Convert to smallest units using BigInt (avoid FP drift)
     const supply = await rpc("getTokenSupply", [CRUSH_MINT]);
     const decimalsNum = Number(supply?.value?.decimals ?? 9);
     const expectedSmallest =
@@ -109,19 +115,14 @@ export default async function handler(req, res) {
       const msg = tx?.transaction?.message;
       const accountKeys = (msg?.accountKeys || []).map((k) => (typeof k === "string" ? k : k?.pubkey) || "");
 
-      // Enforce reference + treasury presence
       if (!accountKeys.includes(reference)) continue;
       if (!accountKeys.includes(RECEIVER)) continue;
-
-      // Memo ties specifically to this item
       if (!parseMemoMatch(tx, `crush:${itemId}`)) continue;
 
-      // Check CRUSH inflow to the treasury
       const delta = findCrushDeltaToTreasury(tx, CRUSH_MINT, RECEIVER);
       if (delta < expectedSmallest) continue;
 
-      // Passed: grant entitlement(s) idempotently
-      if (isBundle(itemId)) {
+      if (isBundle?.(itemId)) {
         const { ids } = getBundleChildren(itemId);
         await grantEntitlements(wallet, ids, sig);
       } else {
@@ -134,7 +135,8 @@ export default async function handler(req, res) {
 
     noStore(res);
     return res.status(200).json({ ok: false, reason: "no-match" });
-  } catch {
+  } catch (e) {
+    try { console.error("verify fatal_error:", e); } catch {}
     noStore(res);
     return res.status(500).json({ ok: false, error: "internal_error" });
   }
