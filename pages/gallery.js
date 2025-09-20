@@ -3,14 +3,14 @@ import Head from "next/head";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-/** ===== ENV / thresholds (match Meet Xenia) ===== */
+/** ===== ENV / thresholds ===== */
 const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const NSFW_HOLD = Number(process.env.NEXT_PUBLIC_NSFW_HOLD ?? "2000");
 const MINT =
   process.env.NEXT_PUBLIC_CRUSH_MINT ||
   "A4R4DhbxhKxc6uNiUaswecybVJuAPwBWV6zQu2gJJskG";
 
-/** ===== RPC rotation with fallback (same as Meet Xenia) ===== */
+/** ===== RPC rotation with fallback ===== */
 const HELIUS_KEY = process.env.NEXT_PUBLIC_HELIUS_KEY || "";
 const RPCS_RAW = [
   process.env.NEXT_PUBLIC_SOLANA_RPC || "",
@@ -44,9 +44,7 @@ async function rpc(method, params) {
 async function getCrushBalance(owner, mint) {
   const res = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
   let total = 0;
-  for (const v of res?.value || []) {
-    total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
-  }
+  for (const v of res?.value || []) total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
   return total;
 }
 
@@ -65,11 +63,7 @@ async function postVerify(body) {
   if (!r.ok) throw new Error("Verify failed");
   return r.json();
 }
-async function getMe() {
-  const r = await fetch("/api/auth/me");
-  if (!r.ok) return { authed: false };
-  return r.json();
-}
+async function getMe() { const r = await fetch("/api/auth/me"); if (!r.ok) return { authed: false }; return r.json(); }
 async function fetchEntitlements(wallet) {
   const r = await fetch(`/api/entitlements?wallet=${encodeURIComponent(wallet)}`);
   if (!r.ok) return [];
@@ -77,12 +71,8 @@ async function fetchEntitlements(wallet) {
   return (j?.items || []).map((x) => x.itemId);
 }
 async function logoutSession() { try { await fetch("/api/auth/logout"); } catch {} }
-function bytesToBase64(bytes) {
-  let bin = "";
-  const arr = Array.from(bytes);
-  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
-  return btoa(bin);
-}
+function bytesToBase64(bytes) { let bin = ""; const arr = Array.from(bytes); for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]); return btoa(bin); }
+function base64ToUint8Array(b64) { const bin = atob(b64); const len = bin.length; const out = new Uint8Array(len); for (let i=0;i<len;i++) out[i]=bin.charCodeAt(i); return out; }
 
 /** ===== Pay/Verify API helpers ===== */
 async function createPayment({ wallet, itemId, ref }) {
@@ -110,26 +100,18 @@ async function verifyPayment({ wallet, itemId, reference }) {
   return r.json();
 }
 
-/** ===== Gallery items (previews only) ===== */
+/** ===== Gallery items ===== */
 const GALLERIES = [
-  {
-    id: "vip-gallery-01",
-    title: "VIP Gallery · 01",
-    images: [
-      { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.png", freeIfHold: 2000 },
-      { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 300, preview: "/xenia/nsfw/nsfw-02-blur.png", freeIfHold: 3000 },
-      { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 400, preview: "/xenia/nsfw/nsfw-03-blur.png", freeIfHold: 5000 },
-    ],
-  },
-  {
-    id: "pp-gallery-02",
-    title: "Purchase-Only Gallery · 02",
-    images: [
-      { id: "pp-02-1", title: "Photo A", priceCrush: 500, preview: "/xenia/pp/pp-01-blur.png" },
-      { id: "pp-02-2", title: "Photo B", priceCrush: 750, preview: "/xenia/pp/pp-02-blur.png", freeIfHold: 3500 },
-      { id: "pp-02-3", title: "Photo C", priceCrush: 1000, preview: "/xenia/pp/pp-03-blur.png" },
-    ],
-  },
+  { id: "vip-gallery-01", title: "VIP Gallery · 01", images: [
+    { id: "vip-gallery-01-1", title: "VIP Photo 01", priceCrush: 250, preview: "/xenia/nsfw/nsfw-01-blur.png", freeIfHold: 2000 },
+    { id: "vip-gallery-01-2", title: "VIP Photo 02", priceCrush: 300, preview: "/xenia/nsfw/nsfw-02-blur.png", freeIfHold: 3000 },
+    { id: "vip-gallery-01-3", title: "VIP Photo 03", priceCrush: 400, preview: "/xenia/nsfw/nsfw-03-blur.png", freeIfHold: 5000 },
+  ]},
+  { id: "pp-gallery-02", title: "Purchase-Only Gallery · 02", images: [
+    { id: "pp-02-1", title: "Photo A", priceCrush: 500, preview: "/xenia/pp/pp-01-blur.png" },
+    { id: "pp-02-2", title: "Photo B", priceCrush: 750, preview: "/xenia/pp/pp-02-blur.png", freeIfHold: 3500 },
+    { id: "pp-02-3", title: "Photo C", priceCrush: 1000, preview: "/xenia/pp/pp-03-blur.png" },
+  ]},
 ];
 
 export default function GalleryPage() {
@@ -144,7 +126,6 @@ export default function GalleryPage() {
 
   useEffect(() => {
     setMounted(true);
-    // capture ?ref= for attribution
     try {
       const u = new URL(window.location.href);
       const ref = u.searchParams.get("ref");
@@ -154,7 +135,6 @@ export default function GalleryPage() {
     } catch {}
   }, []);
 
-  // wallet bootstrap (like Meet Xenia)
   useEffect(() => {
     if (!mounted) return;
     const stored = localStorage.getItem("crush_wallet") || "";
@@ -205,7 +185,6 @@ export default function GalleryPage() {
       const me = await getMe(); setAuthed(me.authed && me.wallet === pk);
     } catch (e) { setErr(e?.message || "Connect failed"); }
   }
-
   async function secureLogin() {
     try {
       if (!wallet) return setErr("Connect wallet first");
@@ -225,11 +204,8 @@ export default function GalleryPage() {
     try {
       const bal = await getCrushBalance(pk, MINT);
       setHold(bal);
-    } catch {
-      setErr("Balance check failed.");
-    } finally {
-      setChecking(false);
-    }
+    } catch { setErr("Balance check failed."); }
+    finally { setChecking(false); }
   }
 
   const nsfwUnlocked = hold >= NSFW_HOLD;
@@ -246,9 +222,7 @@ export default function GalleryPage() {
           <Link href="/meet-xenia" className="text-pink-100 hover:underline">← Back</Link>
           <div className="ml-auto flex items-center gap-2">
             {!wallet ? (
-              <button onClick={connectWallet} className="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-sm font-semibold hover:bg-pink-500">
-                Connect Phantom
-              </button>
+              <button onClick={connectWallet} className="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-sm font-semibold hover:bg-pink-500">Connect Phantom</button>
             ) : (
               <>
                 {!authed ? (
@@ -256,8 +230,7 @@ export default function GalleryPage() {
                 ) : (
                   <span className="px-3 py-1.5 rounded-xl bg-emerald-600/30 border border-emerald-400/40 text-emerald-100 text-xs">Session active</span>
                 )}
-                <button onClick={() => refreshHold()} disabled={checking}
-                        className="px-3 py-1.5 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60">
+                <button onClick={() => refreshHold()} disabled={checking} className="px-3 py-1.5 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60">
                   {checking ? "Checking…" : `Balance: ${hold.toLocaleString()}`}
                 </button>
               </>
@@ -336,26 +309,15 @@ export default function GalleryPage() {
       </main>
 
       <style jsx global>{`
-        .locked-preview {
-          filter: blur(18px) saturate(0.7) brightness(0.7) contrast(0.9);
-          transform: scale(1.02);
-        }
-        .watermark {
-          display: block;
-          background-image: repeating-linear-gradient(
-            -35deg,
-            rgba(255, 255, 255, 0.12) 0 40px,
-            transparent 40px 80px
-          );
-          mix-blend-mode: overlay;
-        }
+        .locked-preview { filter: blur(18px) saturate(0.7) brightness(0.7) contrast(0.9); transform: scale(1.02); }
+        .watermark { display: block; background-image: repeating-linear-gradient(-35deg, rgba(255,255,255,0.12) 0 40px, transparent 40px 80px); mix-blend-mode: overlay; }
         img { -webkit-user-drag: none; user-select: none; }
       `}</style>
     </>
   );
 }
 
-/** ===== Pay button (upgraded: programmatic Phantom ➜ fallback link ➜ SSE + verify) ===== */
+/** ===== Pay button (programmatic Phantom ➜ fallback link ➜ SSE + verify) ===== */
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -365,12 +327,12 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
     setBusy(true); setErr("");
 
     try {
-      // 1) Create → returns reference binding + (universal/solana) links
+      // 1) Create → returns reference & links
       const created = await createPayment({ wallet, itemId, ref: refCode || undefined });
       if (!created?.ok) throw new Error(created?.error || "Create failed");
       const { url: solanaUrl, universalUrl, reference } = created;
 
-      // 2) Subscribe for real-time unlock via SSE
+      // 2) SSE subscription for real-time unlock
       let done = false;
       let es;
       try {
@@ -378,35 +340,29 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
         es.onmessage = (ev) => {
           try {
             const j = JSON.parse(ev.data || "{}");
-            if (j.ok && !done) {
-              done = true;
-              es.close?.();
-              onUnlocked?.();
-            }
+            if (j.ok && !done) { done = true; es.close?.(); onUnlocked?.(); }
           } catch {}
         };
         es.onerror = () => {};
       } catch {}
 
-      // 3) Prefer **programmatic** wallet approval (desktop + Phantom dapp browser)
+      // 3) Prefer programmatic wallet approval (desktop + Phantom dapp browser)
       let programmaticWorked = false;
       if (window?.solana?.signAndSendTransaction) {
         try {
           const txResp = await buildTx({ wallet, itemId, reference });
           if (!txResp?.ok || !txResp?.txBase64) throw new Error(txResp?.error || "Build tx failed");
 
-          const web3 = window.solanaWeb3 || await import("https://esm.sh/@solana/web3.js@1.93.0");
-          const tx = web3.Transaction.from(Buffer.from(txResp.txBase64, "base64"));
+          const { Transaction } = await import("@solana/web3.js");
+          const tx = Transaction.from(base64ToUint8Array(txResp.txBase64));
 
-          // ensure session
           try { await window.solana.connect({ onlyIfTrusted: true }); } catch {}
-
           const { signature } = await window.solana.signAndSendTransaction(tx);
           console.log("Submitted:", signature);
 
           programmaticWorked = true;
 
-          // Nudge verify to publish immediately
+          // Kick verify to publish immediately
           fetch(`/api/pay/verify?wallet=${encodeURIComponent(wallet)}&itemId=${encodeURIComponent(itemId)}&reference=${encodeURIComponent(reference)}`)
             .then(r=>r.json()).then(v => console.log("verify:", v));
         } catch (e) {
@@ -414,7 +370,7 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
         }
       }
 
-      // 4) Fallback: open Phantom universal/solana link (mobile prefers Universal)
+      // 4) Fallback: open Phantom universal/solana link
       if (!programmaticWorked) {
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const open = (href) => window.open(href, "_blank", "noopener,noreferrer");
@@ -450,8 +406,7 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
 
   return (
     <div className="flex flex-col gap-1">
-      <button onClick={start} disabled={busy}
-              className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold disabled:opacity-60">
+      <button onClick={start} disabled={busy} className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold disabled:opacity-60">
         {busy ? "Waiting…" : `Unlock (${price.toLocaleString()})`}
       </button>
       {err && <span className="text-pink-200 text-xs">{err}</span>}

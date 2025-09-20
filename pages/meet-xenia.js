@@ -274,6 +274,13 @@ function bytesToBase64(bytes) {
   for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
   return btoa(bin);
 }
+function base64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 /** ===== Page ===== */
 export default function MeetXenia() {
@@ -404,7 +411,7 @@ export default function MeetXenia() {
     } catch {
       setErr("Balance check failed. Try again.");
     } finally {
-      setChecking(false);
+           setChecking(false);
     }
   }
 
@@ -824,8 +831,8 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
           }).then(r => r.json());
           if (!txResp?.ok || !txResp?.txBase64) throw new Error(txResp?.error || "Build tx failed");
 
-          const web3 = window.solanaWeb3 || await import("https://esm.sh/@solana/web3.js@1.93.0");
-          const tx = web3.Transaction.from(Buffer.from(txResp.txBase64, "base64"));
+          const { Transaction } = await import("@solana/web3.js");
+          const tx = Transaction.from(base64ToUint8Array(txResp.txBase64));
 
           // ensure Phantom session
           try { await window.solana.connect({ onlyIfTrusted: true }); } catch {}
