@@ -58,7 +58,7 @@ function findCrushDeltaToTreasury(tx, mint, receiver) {
     const preAmt = BigInt(preMatch?.uiTokenAmount?.amount || "0");
     delta += postAmt - preAmt;
   }
-  return delta; // smallest units
+  return delta;
 }
 
 export default async function handler(req, res) {
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
     if (!itemId || !reference) { noStore(res); return res.status(400).json({ ok: false, error: "itemId_and_reference_required" }); }
     if (!RECEIVER) { noStore(res); return res.status(500).json({ ok: false, error: "env_missing_PAY_RECEIVER" }); }
 
-    // Dynamic imports to avoid build-time fatal errors
+    // dynamic imports
     let payments, ents;
     try { payments = await import("../../../lib/payments"); }
     catch (e) { try { console.error("verify payments_import_error:", e); } catch {}; return res.status(500).json({ ok: false, error: "payments_import_error" }); }
@@ -85,16 +85,16 @@ export default async function handler(req, res) {
     const { getItem, isBundle, getBundleChildren, CRUSH_MINT } = payments;
     const { grantEntitlement, grantEntitlements } = ents;
 
-    // Resolve expected price (integer tokens)
+    // expected price (integer tokens)
     let expectedUi = 0;
     if (isBundle?.(itemId)) {
       const b = getBundleChildren?.(itemId);
       if (!b) { noStore(res); return res.status(400).json({ ok: false, error: "unknown_bundle" }); }
       expectedUi = Number(b.bundlePriceCrush || 0);
     } else {
-      const item = getItem?.(itemId);
-      if (!item) { noStore(res); return res.status(400).json({ ok: false, error: "unknown_item" }); }
-      expectedUi = Number(item.priceCrush || 0);
+      const it = getItem?.(itemId);
+      if (!it) { noStore(res); return res.status(400).json({ ok: false, error: "unknown_item" }); }
+      expectedUi = Number(it.priceCrush || 0);
     }
 
     const supply = await rpc("getTokenSupply", [CRUSH_MINT]);
@@ -102,11 +102,9 @@ export default async function handler(req, res) {
     const expectedSmallest =
       BigInt(Math.trunc(expectedUi)) * (10n ** BigInt(decimalsNum));
 
-    // 1) signatures that include the reference account
     const sigs = await rpc("getSignaturesForAddress", [reference, { limit: 30 }]);
     if (!Array.isArray(sigs) || sigs.length === 0) { noStore(res); return res.status(200).json({ ok: false, reason: "no-sigs" }); }
 
-    // 2) verify candidate transactions
     for (const s of sigs) {
       const sig = s?.signature;
       if (!sig) continue;

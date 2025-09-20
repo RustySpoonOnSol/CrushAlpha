@@ -20,10 +20,10 @@ export default async function handler(req) {
         const push = (s) => controller.enqueue(enc.encode(s));
         const send = (d) => push(`data: ${JSON.stringify(d)}\n\n`);
 
-        // Keep connection warm
+        // keep connection warm
         const hb = setInterval(() => push(":hb\n\n"), 15000);
 
-        // ✅ await subscription so unsubscribe is reliable
+        // await subscription so unsubscribe is reliable
         const sub = await kv.subscribe(`pay:${ref}`, (msg) => {
           try { send(JSON.parse(msg)); } catch { send({ ok: true }); }
         });

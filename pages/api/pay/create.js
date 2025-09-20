@@ -3,7 +3,12 @@ export const config = { runtime: "nodejs" };
 
 import { randomBytes } from "node:crypto";
 import bs58 from "bs58";
-import { kv } from "@vercel/kv";
+import { createClient } from "@vercel/kv";
+
+const kv = createClient({
+  url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 function noStore(res) {
   res.setHeader("Cache-Control", "no-store");
@@ -22,21 +27,19 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "method_not_allowed" });
     }
 
-    // Basic env validation with explicit error codes
+    // env guardrails
     if (!RECEIVER) return res.status(500).json({ error: "env_missing_PAY_RECEIVER" });
     if (!MINT_PUBLIC) return res.status(500).json({ error: "env_missing_NEXT_PUBLIC_CRUSH_MINT" });
-    if (!process.env.KV_REST_API_URL && !process.env.UPSTASH_REDIS_REST_URL) {
+    if (!process.env.KV_REST_API_URL && !process.env.UPSTASH_REDIS_REST_URL)
       return res.status(500).json({ error: "env_missing_KV_REST_API_URL_or_UPSTASH_REDIS_REST_URL" });
-    }
-    if (!process.env.KV_REST_API_TOKEN && !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    if (!process.env.KV_REST_API_TOKEN && !process.env.UPSTASH_REDIS_REST_TOKEN)
       return res.status(500).json({ error: "env_missing_KV_REST_API_TOKEN_or_UPSTASH_REDIS_REST_TOKEN" });
-    }
 
     const { wallet, itemId, ref } = req.body || {};
     if (!wallet || String(wallet).length < 25) return res.status(400).json({ error: "wallet_missing_or_invalid" });
     if (!itemId) return res.status(400).json({ error: "itemId_required" });
 
-    // Dynamic import of payments to avoid build-time fatal errors
+    // dynamic import => avoids build-time fatal if lib changes
     let payments;
     try {
       payments = await import("../../../lib/payments");
@@ -46,30 +49,24 @@ export default async function handler(req, res) {
     }
     const { getItem, isBundle, getBundle, CRUSH_MINT } = payments;
 
-    if (!CRUSH_MINT || CRUSH_MINT !== MINT_PUBLIC) {
-      // Not fatal, but good to know if mismatched
-      try { console.warn("pay/create mint_mismatch", { CRUSH_MINT, MINT_PUBLIC }); } catch {}
-    }
-
-    // Resolve product
+    // resolve product + price
     let title = "", priceCrush = 0;
     if (isBundle?.(itemId)) {
       const b = getBundle?.(itemId);
       if (!b) return res.status(400).json({ error: "unknown_bundle" });
       title = b.title; priceCrush = Number(b.priceCrush || 0);
     } else {
-      const item = getItem?.(itemId);
-      if (!item) return res.status(400).json({ error: "unknown_item" });
-      title = item.title || itemId; priceCrush = Number(item.priceCrush || 0);
+      const it = getItem?.(itemId);
+      if (!it) return res.status(400).json({ error: "unknown_item" });
+      title = it.title || itemId; priceCrush = Number(it.priceCrush || 0);
     }
-    if (!Number.isFinite(priceCrush) || priceCrush <= 0) {
+    if (!Number.isFinite(priceCrush) || priceCrush <= 0)
       return res.status(400).json({ error: "invalid_price" });
-    }
 
-    // Robust reference: 32 random bytes → base58
+    // robust reference: 32 random bytes -> base58
     const reference = bs58.encode(randomBytes(32));
 
-    // Memo ties tx to this item; keep attribution if present
+    // memo binds tx → item (optional attribution)
     const memo = `crush:${itemId}${ref ? `:ref=${encodeURIComponent(ref)}` : ""}`;
 
     const params = new URLSearchParams({
@@ -84,7 +81,7 @@ export default async function handler(req, res) {
     const solanaUrl    = `solana:${RECEIVER}?${params.toString()}`;
     const universalUrl = `https://phantom.app/ul/v1/solana-pay?recipient=${RECEIVER}&${params.toString()}`;
 
-    // Bind reference → expected item (anti-spoof) for 15 minutes
+    // bind reference → item (anti-spoof), 15 min TTL
     try {
       await kv.set(`pay:ref:${reference}`, { itemId }, { ex: 900 });
     } catch (e) {
