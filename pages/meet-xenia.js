@@ -23,7 +23,7 @@ const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
 const NSFW_HOLD = Number(process.env.NEXT_PUBLIC_NSFW_HOLD ?? "2000");
 const GODDESS_HOLD = Number(process.env.NEXT_PUBLIC_GODDESS_HOLD ?? "5000");
 
-// (Optional) display only — real routing to treasury is done server-side in /api/pay/create
+// (Optional) display only — actual routing to treasury is done server-side in /api/pay/create
 const TREASURY_WALLET = process.env.NEXT_PUBLIC_TREASURY_WALLET || "";
 
 /** ===== Content Catalog ===== */
@@ -222,7 +222,8 @@ async function rpc(method, params) {
 async function getCrushBalance(owner, mint) {
   const res = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
   let total = 0;
-  for (const v of (res?.value || [])) total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
+  for (const v of (res?.value || []))
+    total += Number(v?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
   return total;
 }
 
@@ -251,6 +252,17 @@ async function fetchEntitlements(wallet) {
   return (j?.items || []).map((x) => x.itemId);
 }
 
+// **Client-side fallback grant (idempotent)**
+async function grantEntitlement(wallet, itemId, signature) {
+  try {
+    await fetch("/api/entitlements", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ wallet, itemId, signature }),
+    });
+  } catch {}
+}
+
 /** ===== Auth (signed session) ===== */
 async function getChallenge(wallet) {
   const r = await fetch(`/api/auth/challenge?wallet=${encodeURIComponent(wallet)}`);
@@ -258,7 +270,11 @@ async function getChallenge(wallet) {
   return r.json(); // { wallet, nonce, ts, message }
 }
 async function postVerify(body) {
-  const r = await fetch("/api/auth/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const r = await fetch("/api/auth/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!r.ok) throw new Error("Verify failed");
   return r.json();
 }
@@ -411,7 +427,7 @@ export default function MeetXenia() {
     } catch {
       setErr("Balance check failed. Try again.");
     } finally {
-           setChecking(false);
+      setChecking(false);
     }
   }
 
@@ -490,7 +506,7 @@ export default function MeetXenia() {
           Your flirty AI girlfriend. Teasing chat now — and hotter experiences as you hold more <b>$CRUSH</b>.
         </p>
 
-        {/* WALLET / STATUS ROW (secondary, under hero) */}
+        {/* WALLET / STATUS ROW */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
           {!wallet ? (
             <button onClick={connectWallet} className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold">
@@ -813,6 +829,8 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
             if (j.ok && !done) {
               done = true;
               es.close?.();
+              // persist entitlement (client-side fallback)
+              grantEntitlement(wallet, itemId, j.signature);
               onUnlocked?.();
             }
           } catch {}
@@ -863,6 +881,7 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
             if (v?.ok) {
               done = true;
               es?.close?.();
+              grantEntitlement(wallet, itemId, v.signature);
               onUnlocked?.();
               break;
             }
@@ -876,7 +895,13 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
         const until = Date.now() + 45_000;
         while (!done && Date.now() < until) {
           const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
-          if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
+          if (v?.ok) {
+            done = true;
+            es?.close?.();
+            grantEntitlement(wallet, itemId, v.signature);
+            onUnlocked?.();
+            break;
+          }
           await new Promise((r) => setTimeout(r, 3000));
         }
         if (!done) setErr("Payment submitted, awaiting finality… Use Restore later if needed.");

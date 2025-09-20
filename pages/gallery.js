@@ -1,7 +1,7 @@
 // pages/gallery.js
 import Head from "next/head";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /** ===== ENV / thresholds ===== */
 const CHAT_MIN_HOLD = Number(process.env.NEXT_PUBLIC_MIN_HOLD ?? "500");
@@ -73,6 +73,17 @@ async function fetchEntitlements(wallet) {
 async function logoutSession() { try { await fetch("/api/auth/logout"); } catch {} }
 function bytesToBase64(bytes) { let bin = ""; const arr = Array.from(bytes); for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]); return btoa(bin); }
 function base64ToUint8Array(b64) { const bin = atob(b64); const len = bin.length; const out = new Uint8Array(len); for (let i=0;i<len;i++) out[i]=bin.charCodeAt(i); return out; }
+
+/** ===== Entitlement upsert (client fallback) ===== */
+async function grantEntitlement(wallet, itemId, signature) {
+  try {
+    await fetch("/api/entitlements", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ wallet, itemId, signature })
+    });
+  } catch {}
+}
 
 /** ===== Pay/Verify API helpers ===== */
 async function createPayment({ wallet, itemId, ref }) {
@@ -233,6 +244,16 @@ export default function GalleryPage() {
                 <button onClick={() => refreshHold()} disabled={checking} className="px-3 py-1.5 rounded-xl bg-pink-500 text-white text-sm font-semibold disabled:opacity-60">
                   {checking ? "Checking…" : `Balance: ${hold.toLocaleString()}`}
                 </button>
+                <button
+                  onClick={async () => {
+                    if (!wallet) return;
+                    const ids = await fetchEntitlements(wallet);
+                    setUnlockedMap((m) => { const n = { ...m }; for (const id of ids) n[id] = true; return n; });
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-black/40 border border-pink-300/40 text-pink-100 text-sm font-semibold"
+                >
+                  Restore purchases
+                </button>
               </>
             )}
           </div>
@@ -317,7 +338,7 @@ export default function GalleryPage() {
   );
 }
 
-/** ===== Pay button (programmatic Phantom ➜ fallback link ➜ SSE + verify) ===== */
+/** ===== Pay button (programmatic Phantom ➜ fallback link ➜ SSE + verify + grant) ===== */
 function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -337,10 +358,16 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
       let es;
       try {
         es = new EventSource(`/api/pay/subscribe?ref=${encodeURIComponent(reference)}`);
-        es.onmessage = (ev) => {
+        es.onmessage = async (ev) => {
           try {
             const j = JSON.parse(ev.data || "{}");
-            if (j.ok && !done) { done = true; es.close?.(); onUnlocked?.(); }
+            if (j.ok && !done) {
+              done = true;
+              es.close?.();
+              // persist entitlement (client-side fallback)
+              await grantEntitlement(wallet, itemId, j.signature);
+              onUnlocked?.();
+            }
           } catch {}
         };
         es.onerror = () => {};
@@ -381,7 +408,13 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
           if (done) return;
           for (let i = 0; i < 10 && !done; i++) {
             const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
-            if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
+            if (v?.ok) {
+              done = true;
+              es?.close?.();
+              await grantEntitlement(wallet, itemId, v.signature);
+              onUnlocked?.();
+              break;
+            }
             await new Promise((r) => setTimeout(r, 3000));
           }
           if (!done) setErr("Payment pending. Try Restore later.");
@@ -392,7 +425,13 @@ function PayUnlockButton({ wallet, itemId, price, onUnlocked, refCode }) {
         const until = Date.now() + 45_000;
         while (!done && Date.now() < until) {
           const v = await verifyPayment({ wallet, itemId, reference }).catch(() => null);
-          if (v?.ok) { done = true; es?.close?.(); onUnlocked?.(); break; }
+          if (v?.ok) {
+            done = true;
+            es?.close?.();
+            await grantEntitlement(wallet, itemId, v.signature);
+            onUnlocked?.();
+            break;
+          }
           await new Promise((r) => setTimeout(r, 3000));
         }
         if (!done) setErr("Payment submitted, awaiting finality… Use Restore later if needed.");
