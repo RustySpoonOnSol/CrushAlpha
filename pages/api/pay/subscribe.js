@@ -1,6 +1,18 @@
 // pages/api/pay/subscribe.js
 export const config = { runtime: "edge" };
-import { kv } from "@vercel/kv";
+import { createClient } from "@vercel/kv";
+
+// Use explicit client (Edge) and prefer CRUSH_* overrides
+const kv = createClient({
+  url:
+    process.env.CRUSH_KV_URL ||
+    process.env.KV_REST_API_URL ||
+    process.env.UPSTASH_REDIS_REST_URL,
+  token:
+    process.env.CRUSH_KV_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 /**
  * SSE stream for real-time unlock confirmations.
@@ -20,10 +32,10 @@ export default async function handler(req) {
         const push = (s) => controller.enqueue(enc.encode(s));
         const send = (d) => push(`data: ${JSON.stringify(d)}\n\n`);
 
-        // keep connection warm
+        // Keep connection warm
         const hb = setInterval(() => push(":hb\n\n"), 15000);
 
-        // await subscription so unsubscribe is reliable
+        // ✅ await subscription so unsubscribe is reliable
         const sub = await kv.subscribe(`pay:${ref}`, (msg) => {
           try { send(JSON.parse(msg)); } catch { send({ ok: true }); }
         });

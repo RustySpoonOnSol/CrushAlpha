@@ -18,7 +18,6 @@ function noStore(res) {
   res.setHeader("CDN-Cache-Control", "no-store");
   res.setHeader("Vercel-CDN-Cache-Control", "no-store");
 }
-
 const withTimeout = (p, ms = TIMEOUT_MS) =>
   Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 
@@ -41,7 +40,6 @@ function parseMemoMatch(tx, prefix) {
   const logs = tx?.meta?.logMessages || [];
   return logs.some((l) => typeof l === "string" && l.includes(prefix));
 }
-
 function findCrushDeltaToTreasury(tx, mint, receiver) {
   const pre = tx?.meta?.preTokenBalances || [];
   const post = tx?.meta?.postTokenBalances || [];
@@ -75,7 +73,7 @@ export default async function handler(req, res) {
     if (!itemId || !reference) { noStore(res); return res.status(400).json({ ok: false, error: "itemId_and_reference_required" }); }
     if (!RECEIVER) { noStore(res); return res.status(500).json({ ok: false, error: "env_missing_PAY_RECEIVER" }); }
 
-    // dynamic imports
+    // Dynamic imports keep build robust
     let payments, ents;
     try { payments = await import("../../../lib/payments"); }
     catch (e) { try { console.error("verify payments_import_error:", e); } catch {}; return res.status(500).json({ ok: false, error: "payments_import_error" }); }
@@ -85,7 +83,7 @@ export default async function handler(req, res) {
     const { getItem, isBundle, getBundleChildren, CRUSH_MINT } = payments;
     const { grantEntitlement, grantEntitlements } = ents;
 
-    // expected price (integer tokens)
+    // Expected price (integer tokens)
     let expectedUi = 0;
     if (isBundle?.(itemId)) {
       const b = getBundleChildren?.(itemId);
@@ -97,14 +95,16 @@ export default async function handler(req, res) {
       expectedUi = Number(it.priceCrush || 0);
     }
 
+    // Convert to smallest units using BigInt
     const supply = await rpc("getTokenSupply", [CRUSH_MINT]);
     const decimalsNum = Number(supply?.value?.decimals ?? 9);
-    const expectedSmallest =
-      BigInt(Math.trunc(expectedUi)) * (10n ** BigInt(decimalsNum));
+    const expectedSmallest = BigInt(Math.trunc(expectedUi)) * (10n ** BigInt(decimalsNum));
 
+    // 1) Find candidate signatures that include the reference
     const sigs = await rpc("getSignaturesForAddress", [reference, { limit: 30 }]);
     if (!Array.isArray(sigs) || sigs.length === 0) { noStore(res); return res.status(200).json({ ok: false, reason: "no-sigs" }); }
 
+    // 2) Verify each candidate
     for (const s of sigs) {
       const sig = s?.signature;
       if (!sig) continue;
